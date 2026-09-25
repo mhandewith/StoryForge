@@ -8,10 +8,10 @@ import (
 )
 
 func TestEndpoints(t *testing.T) {
-	for _, path := range []string{"/", "/healthz"} {
+	for _, path := range []string{"/healthz"} {
 		t.Run(path, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+			handler(nil, t.TempDir()).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", recorder.Code)
 			}
@@ -41,7 +41,7 @@ func TestRouting(t *testing.T) {
 		{http.MethodPost, "/healthz", http.StatusMethodNotAllowed},
 	} {
 		recorder := httptest.NewRecorder()
-		handler().ServeHTTP(recorder, httptest.NewRequest(tc.method, tc.path, nil))
+		handler(nil, t.TempDir()).ServeHTTP(recorder, httptest.NewRequest(tc.method, tc.path, nil))
 		if recorder.Code != tc.status {
 			t.Errorf("%s %s: status = %d, want %d", tc.method, tc.path, recorder.Code, tc.status)
 		}

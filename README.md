@@ -1,108 +1,230 @@
 # StoryForge
 
-A minimal Go backend packaged for Unraid. Database, frontend, and audio recording follow in later milestones.
+A collaborative script and voice studio for the family. Milestone 2 provides
+persistent project and script management. Recording and audio processing come next.
 
-## Publish to GitHub Container Registry
+Deployed home-network address: **http://192.168.86.127:8088**.
 
-This uses the same deployment approach as SagesSagaTracker: GitHub builds and publishes the image, and Unraid downloads it.
+## What works
 
-1. Commit and push the project, including `.github/workflows/publish-image.yml`, to `main`.
-2. Open [GitHub Actions](https://github.com/mhandewith/StoryForge/actions) and wait for **Publish Docker image** to succeed.
-3. Open your GitHub account's **Packages**, select **storyforge**, then **Package settings**. For downloads without credentials, change visibility to **Public**. This makes the image downloadable by anyone; source repository visibility is separate. New packages default to private. Alternatively, keep it private and run `docker login ghcr.io -u mhandewith` on Unraid, supplying a GitHub classic token with `read:packages` at the password prompt.
+- Create projects and ordered scenes.
+- Create reusable actors (Hazel, Hannah, Dad) and characters within each project.
+- Assign an actor to each character.
+- Create and edit ordered dialogue, performance directions, and start times.
+- Reload saved data and retain it across application/database restarts.
+- Preserve dialogue revisions for future recordings. Conflicting edits return a
+  conflict instead of silently overwriting another editor's work.
 
-The workflow builds Linux amd64, runs Go tests, starts the container, verifies its health, and publishes:
+The React/TypeScript/Vite admin is served by the Go backend at the same address.
+PostgreSQL stores metadata. There is no recording, authentication, or audio storage
+in this milestone. The app is intended for the home network.
 
-- `ghcr.io/mhandewith/storyforge:latest`
-- `ghcr.io/mhandewith/storyforge:<full-commit-sha>`
+## Upgrade the existing Unraid deployment
 
-Pull requests build and test without publishing. Manual runs on main also publish. The built-in GitHub token handles publishing; no Docker Hub account or custom secret is required. GitHub Actions and package publishing must be allowed by repository policy.
+**Configure PostgreSQL and the connection variables before updating StoryForge.**
+This version requires a database. Keep the same HTTP mapping (host 8088 to
+container 8080). No changes to your router are required.
 
-**The image address only works after the first successful publish and package access setup.** Preparing the workflow locally does not publish it.
+### 1. Create a private Docker network
 
-See [GitHub publishing documentation](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images) and [registry access](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-
-## Install on Unraid
-
-Go to **Docker > Add Container**, start without a template, and enter:
-
-| Setting | Value |
-| --- | --- |
-| Name | `storyforge` |
-| Repository | `ghcr.io/mhandewith/storyforge:latest` |
-| Network Type | `Bridge` |
-| Console shell, if shown | `sh` |
-| WebUI, Advanced View | `http://[IP]:[PORT:8080]/` |
-
-Click **Add another Path, Port, Variable, Label or Device**, choose **Port**, and set:
-
-| Setting | Value |
-| --- | --- |
-| Name | `HTTP` |
-| Container Port | `8080` |
-| Host Port | `8088`, or another unused port |
-| Connection Type | `TCP` |
-
-Click **Apply**. Unraid downloads the image and starts the backend. Enable **Autostart** if desired. No source copying, server build, volume mappings, privileged mode, or Compose plugin is required.
-
-See [Unraid container settings](https://docs.unraid.net/unraid-os/using-unraid-to/run-docker-containers/managing-and-customizing-containers/).
-
-## Test it
-
-Open `http://YOUR-UNRAID-IP:8088/healthz` from a device on your LAN:
-
-```json
-{"service":"StoryForge","status":"ok"}
-```
-
-The root URL `http://YOUR-UNRAID-IP:8088/` returns a startup message.
-In Unraid's terminal:
+In Unraid's web terminal, run once:
 
 ```sh
-curl -i http://127.0.0.1:8088/healthz
-docker inspect --format='{{.State.Health.Status}}' storyforge
-docker logs --tail=50 storyforge
+docker network create storyforge-net
 ```
 
-Expect HTTP 200 and `healthy` within about 30 seconds. Restart the container and refresh the URL to confirm it comes back. Health checks only the HTTP service; there are no database or storage dependencies yet.
+If Docker says the network already exists, reuse it. This lets the containers
+reach one another by name without publishing PostgreSQL's port to your LAN.
 
-## Updates and troubleshooting
+### 2. Add PostgreSQL through Docker > Add Container
 
-- **Update:** push changes to main, wait for publishing to succeed, then use Unraid's **Check for Updates / Update** to download and recreate the container. Restart alone does not fetch a new image.
-- **Denied/unauthorized:** check package visibility or registry login.
-- **Manifest unknown:** check the first workflow succeeded and the Repository field is exactly `ghcr.io/mhandewith/storyforge:latest`.
-- **Port allocated:** change host port 8088 to an unused port, leave container port 8080, and update your browser URL.
-- **Container exits/unhealthy:** inspect `docker logs storyforge` and `docker inspect storyforge`.
-- **Unraid curl works but browser fails:** check server IP, host port, and that your device is on the same LAN rather than an isolated guest network.
+| Field | Value |
+| --- | --- |
+| Name | `storyforge-db` |
+| Repository | `postgres:17-alpine` |
+| Network Type | `Custom: storyforge-net` |
+| Privileged | Off |
 
-## Local development
+Add these **Variables** (key and value):
 
-Requires Go 1.24 or newer; Docker builds use Go 1.26.
+| Key | Value |
+| --- | --- |
+| `POSTGRES_USER` | `storyforge` |
+| `POSTGRES_DB` | `storyforge` |
+| `POSTGRES_PASSWORD` | Choose a unique password; use the same value in StoryForge below |
 
-```powershell
-cd C:\Repos\StoryForge\backend
-go test ./...
-go run ./cmd/server
+Add one **Path**:
+
+| Container path | Host path | Access |
+| --- | --- | --- |
+| `/var/lib/postgresql/data` | `/mnt/user/appdata/storyforge/postgres` | Read/Write |
+
+Use a new empty directory dedicated to this database. No port mapping is needed.
+Click **Apply**. Enable **Autostart** and check the log for
+`database system is ready to accept connections`.
+
+PostgreSQL initialization variables only create the account/database on the
+first launch with empty storage. Changing the password variable later does not
+change an existing database password. Keep the image on major version 17;
+major-version upgrades need a database migration.
+
+### 3. Update the existing StoryForge container settings
+
+Edit StoryForge in Unraid:
+
+| Field | Value |
+| --- | --- |
+| Repository | `ghcr.io/mhandewith/storyforge:latest` |
+| Network Type | `Custom: storyforge-net` |
+| WebUI, Advanced View | `http://[IP]:[PORT:8080]/` |
+
+Add these **Variables**:
+
+| Key | Value |
+| --- | --- |
+| `PGHOST` | `storyforge-db` |
+| `PGPORT` | `5432` |
+| `PGUSER` | `storyforge` |
+| `PGDATABASE` | `storyforge` |
+| `PGPASSWORD` | The same password chosen above |
+| `PGSSLMODE` | `disable` |
+
+Retain the TCP port mapping **host 8088 → container 8080**. Click **Apply**, then
+use **Check for Updates / Update** (or **Force Update**) to pull the published
+image. The app waits up to 60 seconds for PostgreSQL and applies migrations
+automatically. Enable Autostart, with PostgreSQL before StoryForge.
+
+No app volume is required yet. All current records are in PostgreSQL's mapped
+directory. Do not delete that directory when recreating containers.
+
+### 4. Acceptance test
+
+1. Open **http://192.168.86.127:8088**.
+2. Create a project, such as **The lantern in the woods**.
+3. Open **Cast & characters**. Add Hazel and Hannah as actors.
+4. Add their characters and choose the actor for each.
+5. Open **Scenes & script** and add one scene.
+6. Add ten dialogue lines, five per character. Positions control reading order.
+   Start time is in milliseconds and can remain 0 while drafting; equal times
+   are allowed for future overlapping dialogue.
+7. Edit one line and click **Save changes**.
+8. Reload the page and select the project again. Confirm the cast and lines.
+9. Stop StoryForge, restart PostgreSQL, then start StoryForge. Confirm all records
+   remain. This also checks that migrations do not duplicate data.
+
+Status URLs:
+
+- [Process health](http://192.168.86.127:8088/healthz)
+- [Database readiness](http://192.168.86.127:8088/readyz)
+
+The Docker health check uses readiness, which requires PostgreSQL.
+The process health endpoint remains available during a later database outage.
+
+### Troubleshooting
+
+- **Container exits:** check `docker logs storyforge`. Missing connection
+  configuration and startup database timeouts produce explicit messages.
+- **Database unavailable:** confirm both containers use `storyforge-net`, check
+  `PGHOST`, credentials, and `docker logs storyforge-db`.
+- **Denied pulling image:** the GitHub package must be public or Unraid must be
+  signed in to GHCR. See the publishing section.
+- **Port allocated:** use another unused host port, leaving container port 8080.
+- **Position in use:** choose an unused positive position in that scene. Positions
+  may have gaps; moving a line never silently replaces another line.
+- **Line changed:** another edit won the race. Copy any unsaved text, use Reload,
+  and edit the current version.
+- **Database password changed only in Unraid:** restore the original connection
+  password or explicitly change the database role password using PostgreSQL.
+
+Back up the database to an existing backup share (adjust the destination):
+
+```sh
+docker exec storyforge-db pg_dump -U storyforge -d storyforge -Fc > /mnt/user/backups/storyforge.dump
 ```
 
-Open <http://localhost:8080/healthz>. Stop with Ctrl+C.
-The optional `PORT` environment variable changes the default 8080 listener.
-Unknown URLs return 404.
+This writes a database dump on the host. Back up using PostgreSQL tools rather
+than copying database files while PostgreSQL is running.
 
-## Docker Compose alternative
+## Local development / Docker Compose
 
-To pull the published image, from the repository root:
+Copy `.env.example` to `.env` and replace the example password.
+With Docker in Linux-container mode:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
+
+Open <http://localhost:8088>. PostgreSQL uses a named Docker volume and is not
+published to a host port. `docker compose down` retains it; `down -v` deletes it.
+To run published images instead:
 
 ```sh
 docker compose pull
 docker compose up -d
 ```
 
-To build local source for development:
+For development outside Docker, use Go 1.25+ and Node 22.12+ (CI uses Go 1.26 and
+Node 22). Run `npm ci` and `npm run build` in `frontend`. Configure
+`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, and `PGSSLMODE`
+for a reachable local PostgreSQL database, then run `go run ./cmd/server` from
+`backend`. Alternatively set `DATABASE_URL` to a PostgreSQL connection URL
+(URL-encode special characters in credentials). The separate variables avoid
+URL-encoding passwords.
 
-```sh
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+The server defaults to port 8080 and `WEB_DIR=../frontend/dist`. For frontend
+hot reload, run `npm run dev` in `frontend`; Vite proxies API requests to
+the backend on 8080.
+
+## Architecture and API
+
+- `backend/cmd/server`: HTTP lifecycle and static frontend serving.
+- `backend/internal/api`: JSON API, validation, and PostgreSQL queries.
+- `backend/migrations`: numbered SQL migrations embedded in the Go binary;
+  applied once inside a transaction with a database advisory lock.
+- `frontend/src`: React admin screens.
+- `scripts/container-smoke.py`: isolated database and container tests.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/workspace` | Consistent snapshot of projects, cast, scenes, and dialogue |
+| POST | `/api/projects` | Create project: `name` |
+| POST | `/api/actors` | Create actor: `name` |
+| POST | `/api/characters` | Create character: `project_id, name` |
+| POST | `/api/scenes` | Create scene: `project_id, name, position` |
+| PUT | `/api/assignments/{character_id}` | Assign/reassign role: `actor_id` |
+| POST | `/api/events` | Create dialogue |
+| PUT | `/api/events/{id}` | Edit dialogue with current `revision` |
+| GET | `/healthz` | Process liveness |
+| GET | `/readyz` | Database readiness |
+
+Dialogue fields: `project_id, scene_id, character_id, text, direction, position,
+start_ms`. Edits also require `revision`. Relationships are enforced by foreign
+keys, including composite keys preventing cross-project scene/character mixing.
+The database archives every dialogue revision. There are no delete endpoints yet.
+
+## Tests and publishing
+
+Pushes to `main` run Go tests/vet, build the image, exercise the PostgreSQL API,
+run a Chromium browser test that creates Hazel and Hannah's ten-line scene,
+verify data after recreating the app and restarting the database, and then
+publish to GHCR. Browser screenshots/traces are saved as workflow artifacts.
+Pull requests run the same checks without publishing. Failures block publication.
+
+```text
+ghcr.io/mhandewith/storyforge:latest
+ghcr.io/mhandewith/storyforge:<full-commit-sha>
 ```
 
-Both expose <http://localhost:8088/>. Put `STORYFORGE_PORT=8090` in a local `.env` file to change the host port. Stop with `docker compose down`. Use either Compose or the Unraid template to manage the container, not both.
+Use [GitHub Actions](https://github.com/mhandewith/StoryForge/actions) to check a
+build. The workflow uses GitHub's built-in token. Public package visibility
+allows Unraid downloads without credentials. For a private package, use
+`docker login ghcr.io -u mhandewith` and a classic token with `read:packages`.
 
-This milestone has no persistent data, authentication, HTTPS, or frontend.
+This milestone uses one actor per character and manual line/scene positions.
+It does not yet provide actor recording, scene rendering, audio assets, bulk
+script import, or project/actor/character renaming.
+
+Official references:
+[Unraid container settings](https://docs.unraid.net/unraid-os/using-unraid-to/run-docker-containers/managing-and-customizing-containers/),
+[PostgreSQL image](https://hub.docker.com/_/postgres),
+[GitHub registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).

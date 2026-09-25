@@ -31,7 +31,7 @@ jobs:
       - name: Check Go code
         working-directory: backend
         run: |
-          test -z "$(gofmt -l cmd)"
+          test -z "$(gofmt -l cmd internal migrations)"
           go test -race ./...
           go vet ./...
 
@@ -43,21 +43,37 @@ jobs:
       - name: Build and test
         run: docker build --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" -t "$IMAGE:$GITHUB_SHA" .
 
-      - name: Check running container
-        shell: bash
+      - name: Test PostgreSQL API
+        env:
+          SMOKE_IMAGE: ${{ env.IMAGE }}:${{ github.sha }}
+        run: python3 scripts/container-smoke.py setup
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test admin in desktop and mobile browsers
+        working-directory: frontend
         run: |
-          docker run -d --name storyforge-test -p 127.0.0.1:8088:8080 "$IMAGE:$GITHUB_SHA"
-          trap 'docker logs storyforge-test; docker rm -f storyforge-test' EXIT
-          for attempt in {1..30}; do
-            status=$(docker inspect --format='{{.State.Health.Status}}' storyforge-test)
-            if [ "$status" = healthy ]; then
-              curl --fail --silent http://127.0.0.1:8088/healthz | jq -e '.status == "ok" and .service == "StoryForge"'
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Container failed its health check"
-          exit 1
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test
+
+      - name: Verify persistence and database recovery
+        env:
+          SMOKE_IMAGE: ${{ env.IMAGE }}:${{ github.sha }}
+        run: python3 scripts/container-smoke.py restart
+
+      - name: Save browser screenshots and failure traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-browser-results
+          path: frontend/test-results/
+
+      - name: Clean up test environment
+        if: always()
+        run: python3 scripts/container-smoke.py cleanup
 
       - name: Publish to GitHub Container Registry
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

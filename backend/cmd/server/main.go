@@ -2,46 +2,88 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mhandewith/StoryForge/backend/internal/api"
+	"github.com/mhandewith/StoryForge/backend/migrations"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
 
-func handler() http.Handler {
+func handler(db *pgxpool.Pool, webDir string) http.Handler {
 	mux := http.NewServeMux()
+	(&api.API{DB: db}).Register(mux)
+	mux.Handle("GET /assets/", http.FileServer(http.Dir(webDir)))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"service": "StoryForge", "message": "StoryForge backend is running", "health": "/healthz",
-		})
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "StoryForge"})
+		api.JSON(w, 200, map[string]string{"status": "ok", "service": "StoryForge"})
 	})
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if os.Getenv("DATABASE_URL") == "" && os.Getenv("PGHOST") == "" {
+		return errors.New("configure DATABASE_URL or PGHOST/PGUSER/PGPASSWORD/PGDATABASE before starting StoryForge")
+	}
+	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return errors.New("invalid PostgreSQL connection configuration")
+	}
+	defer db.Close()
+	// Unraid may start the app before PostgreSQL finishes initializing.
+	startup, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	for {
+		pingCtx, pingCancel := context.WithTimeout(startup, 2*time.Second)
+		err = db.Ping(pingCtx)
+		pingCancel()
+		if err == nil {
+			break
+		}
+		slog.Info("Waiting for PostgreSQL")
+		select {
+		case <-startup.Done():
+			return errors.New("PostgreSQL did not become available within 60 seconds; check connection settings and database logs")
+		case <-time.After(time.Second):
+		}
+	}
+	if err = migrations.Apply(startup, db); err != nil {
+		return fmt.Errorf("database migration failed: %w", err)
+	}
+	webDir := os.Getenv("WEB_DIR")
+	if webDir == "" {
+		webDir = "../frontend/dist"
+	}
+	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
+		return errors.New("frontend build missing; run npm run build in frontend or configure WEB_DIR")
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	server := &http.Server{
-		Addr: ":" + port, Handler: handler(),
+		Addr: ":" + port, Handler: handler(db, webDir),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	result := make(chan error, 1)
 	go func() {
 		slog.Info("StoryForge backend starting", "address", server.Addr)
