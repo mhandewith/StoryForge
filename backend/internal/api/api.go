@@ -35,7 +35,14 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 		problem(w, 415, "Send application/json.")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	limit := int64(64 * 1024)
+	if strings.HasSuffix(r.URL.Path, "-order") {
+		limit = 512 * 1024
+	}
+	if r.URL.Path == "/api/import" || r.URL.Path == "/api/import/preview" {
+		limit = 1024 * 1024
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(value); err != nil {
@@ -57,6 +64,7 @@ func validText(s string, limit int) bool {
 }
 
 func (a *API) Register(mux *http.ServeMux) {
+	a.registerTools(mux)
 	mux.HandleFunc("GET /api/workspace", a.workspace)
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("POST /api/actors", a.createActor)
@@ -105,7 +113,13 @@ func (a *API) row(w http.ResponseWriter, r *http.Request, status int, query stri
 	var data json.RawMessage
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	if err := a.DB.QueryRow(ctx, query, args...).Scan(&data); err != nil {
+	var err error
+	if r.Method == "GET" {
+		err = a.DB.QueryRow(ctx, query, args...).Scan(&data)
+	} else {
+		err = a.write(ctx, func(tx pgx.Tx) error { return tx.QueryRow(ctx, query, args...).Scan(&data) })
+	}
+	if err != nil {
 		a.failure(w, err)
 		return
 	}
@@ -115,12 +129,12 @@ func (a *API) row(w http.ResponseWriter, r *http.Request, status int, query stri
 // One statement gives the admin a consistent snapshot, including empty arrays.
 func (a *API) workspace(w http.ResponseWriter, r *http.Request) {
 	a.row(w, r, 200, `SELECT jsonb_build_object(
- 'projects', COALESCE((SELECT jsonb_agg(p ORDER BY p.created_at,p.id) FROM projects p),'[]'::jsonb),
- 'actors', COALESCE((SELECT jsonb_agg(a ORDER BY a.name,a.id) FROM actors a),'[]'::jsonb),
- 'scenes', COALESCE((SELECT jsonb_agg(s ORDER BY s.position,s.id) FROM scenes s),'[]'::jsonb),
- 'characters', COALESCE((SELECT jsonb_agg(c ORDER BY c.name,c.id) FROM characters c),'[]'::jsonb),
- 'assignments', COALESCE((SELECT jsonb_agg(a ORDER BY a.character_id) FROM assignments a),'[]'::jsonb),
- 'events', COALESCE((SELECT jsonb_agg(e ORDER BY e.position,e.id) FROM script_events e),'[]'::jsonb))`)
+ 'projects', COALESCE((SELECT jsonb_agg(p ORDER BY p.created_at,p.id) FROM active_projects p),'[]'::jsonb),
+ 'actors', COALESCE((SELECT jsonb_agg(a ORDER BY a.name,a.id) FROM active_actors a),'[]'::jsonb),
+ 'scenes', COALESCE((SELECT jsonb_agg(s ORDER BY s.position,s.id) FROM active_scenes s),'[]'::jsonb),
+ 'characters', COALESCE((SELECT jsonb_agg(c ORDER BY c.name,c.id) FROM active_characters c),'[]'::jsonb),
+ 'assignments', COALESCE((SELECT jsonb_agg(a ORDER BY a.character_id) FROM active_assignments a),'[]'::jsonb),
+ 'events', COALESCE((SELECT jsonb_agg(e ORDER BY e.position,e.id) FROM active_events e),'[]'::jsonb))`)
 }
 
 type named struct {
@@ -168,7 +182,7 @@ func (a *API) createScene(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "Enter a name, project, and positive scene position.")
 		return
 	}
-	a.row(w, r, 201, `INSERT INTO scenes(project_id,name,position) VALUES ($1,$2,$3) RETURNING row_to_json(scenes)`, in.ProjectID, in.Name, in.Position)
+	a.row(w, r, 201, `INSERT INTO scenes(project_id,name,position) SELECT id,$2,$3 FROM active_projects WHERE id=$1 RETURNING row_to_json(scenes)`, in.ProjectID, in.Name, in.Position)
 }
 func (a *API) createCharacter(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -183,7 +197,7 @@ func (a *API) createCharacter(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "Enter a character name and project.")
 		return
 	}
-	a.row(w, r, 201, `INSERT INTO characters(project_id,name) VALUES ($1,$2) RETURNING row_to_json(characters)`, in.ProjectID, in.Name)
+	a.row(w, r, 201, `INSERT INTO characters(project_id,name) SELECT id,$2 FROM active_projects WHERE id=$1 RETURNING row_to_json(characters)`, in.ProjectID, in.Name)
 }
 func (a *API) assign(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -196,7 +210,7 @@ func (a *API) assign(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "Choose a character and actor.")
 		return
 	}
-	a.row(w, r, 200, `INSERT INTO assignments(character_id,actor_id) VALUES ($1,$2)
+	a.row(w, r, 200, `INSERT INTO assignments(character_id,actor_id) SELECT c.id,a.id FROM active_characters c CROSS JOIN active_actors a WHERE c.id=$1 AND a.id=$2
  ON CONFLICT (character_id) DO UPDATE SET actor_id=EXCLUDED.actor_id RETURNING row_to_json(assignments)`, r.PathValue("characterID"), in.ActorID)
 }
 
@@ -226,7 +240,8 @@ func (a *API) createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.row(w, r, 201, `INSERT INTO script_events(project_id,scene_id,character_id,text,direction,position,start_ms)
- VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING row_to_json(script_events)`, in.ProjectID, in.SceneID, in.CharacterID, in.Text, in.Direction, in.Position, in.StartMS)
+ SELECT $1,s.id,c.id,$4,$5,$6,$7 FROM active_scenes s CROSS JOIN active_characters c WHERE s.id=$2 AND c.id=$3
+ RETURNING row_to_json(script_events)`, in.ProjectID, in.SceneID, in.CharacterID, in.Text, in.Direction, in.Position, in.StartMS)
 }
 func (a *API) updateEvent(w http.ResponseWriter, r *http.Request) {
 	var in eventInput
@@ -240,8 +255,11 @@ func (a *API) updateEvent(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	var data json.RawMessage
-	err := a.DB.QueryRow(ctx, `UPDATE script_events SET character_id=$1,text=$2,direction=$3,position=$4,start_ms=$5,revision=revision+1,updated_at=now()
- WHERE id=$6 AND project_id=$7 AND scene_id=$8 AND revision=$9 RETURNING row_to_json(script_events)`, in.CharacterID, in.Text, in.Direction, in.Position, in.StartMS, r.PathValue("eventID"), in.ProjectID, in.SceneID, in.Revision).Scan(&data)
+	err := a.write(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `UPDATE script_events SET character_id=$1,text=$2,direction=$3,position=$4,start_ms=$5,revision=revision+1,updated_at=now()
+ WHERE id=$6 AND project_id=$7 AND scene_id=$8 AND revision=$9 AND id IN (SELECT id FROM active_events)
+ AND $1 IN (SELECT id FROM active_characters) RETURNING row_to_json(script_events)`, in.CharacterID, in.Text, in.Direction, in.Position, in.StartMS, r.PathValue("eventID"), in.ProjectID, in.SceneID, in.Revision).Scan(&data)
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		problem(w, 409, "This line changed or no longer exists. Reload before editing again.")
 		return

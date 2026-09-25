@@ -1,0 +1,15 @@
+[script: The lantern in the woods]
+[cast: Scout | Hazel]
+[cast: Owl | Hannah]
+
+[scene: A light between the trees]
+[Scout]
+[direction: Quietly, with wonder]
+Did you see that little light?
+
+[Owl]
+There, just beyond the old oak.
+
+[scene: Following the light]
+[Scout]
+Then let's find out who is there.

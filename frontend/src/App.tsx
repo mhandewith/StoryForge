@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { empty, request, type Workspace, type Named, type Line } from './api';
+import { SortList, SortRow, ConfirmDialog, DeleteLine, Importer } from './ScriptTools';
 
 type Save = (path:string,body:unknown,method?:string)=>Promise<boolean>;
 function Card({title,description,children}:{title:string;description:string;children:ReactNode}) {
@@ -16,6 +17,7 @@ function LineForm({line,projectID,sceneID,characters,nextPosition,save,busy,canc
   const [direction,setDirection]=useState(line?.direction||'');
   const [position,setPosition]=useState(line?.position||nextPosition);
   const [start,setStart]=useState(line?.start_ms||0);
+  useEffect(()=>{if(!line)setPosition(nextPosition);},[nextPosition,line]);
   async function submit(e:FormEvent) {
     e.preventDefault();
     const body={project_id:projectID,scene_id:sceneID,character_id:character,text,direction,position,start_ms:start,...(line?{revision:line.revision}:{})};
@@ -47,6 +49,10 @@ export default function App() {
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
   const [tab,setTab]=useState<'script'|'cast'>('script');
+  const [importing,setImporting]=useState(false);
+  const [removal,setRemoval]=useState<{title:string;message:string;path:string}>();
+  const editForm=useRef<HTMLDivElement>(null);
+  useEffect(()=>{if(editing){editForm.current?.scrollIntoView({behavior:'smooth',block:'center'});editForm.current?.querySelector('textarea')?.focus({preventScroll:true});}},[editing]);
   async function refresh() {
     const workspace=await request<Workspace>('/api/workspace'); setData(workspace);
     setProjectID(id=>workspace.projects.some(p=>p.id===id)?id:workspace.projects[0]?.id||'');
@@ -64,8 +70,9 @@ export default function App() {
     try {
       const item=await request<Named>(path,method,body);
       try {await refresh();} catch {setError('Saved, but the list could not refresh. Use Reload before making more changes.');return true;}
-      if(path==='/api/projects'){setProjectID(item.id);setSceneID('');setEditing(undefined);}
+      if(path==='/api/projects'||path==='/api/import'){setProjectID(item.id);setSceneID('');setEditing(undefined);setTab('script');}
       if(path==='/api/scenes'){setSceneID(item.id);setEditing(undefined);}
+      if(method==='DELETE'){setEditing(undefined);setRemoval(undefined);}
       setNotice('Saved to StoryForge.');return true;
     } catch(e) {setError(e instanceof Error?e.message:'Unable to save.');return false;}
     finally{setBusy(false);}
@@ -73,6 +80,11 @@ export default function App() {
   function changeProject(id:string){setProjectID(id);setSceneID('');setEditing(undefined);setNotice('');}
   async function reload(){setBusy(true);setError('');try{await refresh();setEditing(undefined);setNotice('Reloaded from the server.');}catch(e){setError(e instanceof Error?e.message:'Unable to reload.');}finally{setBusy(false);}}
   const actorFor=(characterID:string)=>data.actors.find(a=>a.id===data.assignments.find(x=>x.character_id===characterID)?.actor_id)?.name;
+  async function reorder(kind:'scenes'|'lines',ids:string[]){
+    if(editing&&!window.confirm('Discard the current unsaved line edits and reorder?'))return;
+    const path=kind==='scenes'?`/api/projects/${projectID}/scene-order`:`/api/scenes/${scene?.id}/line-order`;
+    if(await save(path,{ids,expected:(kind==='scenes'?scenes:lines).map(x=>x.id)},'PUT'))setEditing(undefined);
+  }
   return <div className="app">
     <aside className="sidebar"><a className="brand" href="/"><span className="brand-icon">S</span><span>StoryForge<small>THE SCRIPT STUDIO</small></span></a>
       <div className="sidebar-label">YOUR STORIES</div>
@@ -85,20 +97,23 @@ export default function App() {
         {error&&<div className="banner error" role="alert">{error}</div>}{notice&&<div className="banner notice" role="status">{notice}</div>}
         {loading?<p className="empty">Opening your studio…</p>:<>
           <div className="stats"><div><strong>{scenes.length}</strong><span>SCENES</span></div><div><strong>{characters.length}</strong><span>CHARACTERS</span></div><div><strong>{data.events.filter(e=>e.project_id===projectID).length}</strong><span>DIALOGUE LINES</span></div><p>Your script is the start.<br/><span>Recording comes next.</span></p></div>
+          <div className="script-tools"><button className="secondary" disabled={busy} onClick={()=>setImporting(!importing)}>Import script</button>{project&&<button className="text-button danger-text" disabled={busy} onClick={()=>setRemoval({title:`Delete script “${project.name}”?`,message:'This script, its scenes, and its lines will disappear from the workspace. They will stay archived in the database. Actors remain available to other scripts. Archive browsing will come later.',path:`/api/projects/${projectID}`})}>Delete script</button>}</div>
+          {importing&&<Importer busy={busy} save={save} onClose={()=>setImporting(false)}/>}
           <details className="project-create" open={!project}><summary>Create a new project</summary><NameForm label="Project name" button="Create project" disabled={busy} onSave={name=>save('/api/projects',{name})}/></details>
           {!project?<div className="welcome"><span>01 / BEGIN</span><h2>Make room for your first story.</h2><p>Create a project above, then add your cast and a scene.</p></div>:tab==='cast'?<div className="cast-layout">
-            <Card title="The people behind the voices" description="Actors are available across all your projects."><NameForm label="Actor name" button="Add actor" disabled={busy} onSave={name=>save('/api/actors',{name})}/><div className="actor-list">{data.actors.map(a=><div key={a.id}><span className="avatar">{a.name.slice(0,1)}</span>{a.name}</div>)}</div>{!data.actors.length&&<p className="empty">Add Hazel, Hannah, or anyone joining the story.</p>}</Card>
-            <Card title="Characters in this story" description="Give each role a name and choose who will play it."><NameForm label="Character name" button="Add character" disabled={busy} onSave={name=>save('/api/characters',{name,project_id:projectID})}/><div className="character-list">{characters.map(c=><div className="character-row" key={c.id}><strong>{c.name}</strong><label>Played by<select aria-label={`Actor for ${c.name}`} disabled={busy||!data.actors.length} value={data.assignments.find(a=>a.character_id===c.id)?.actor_id||''} onChange={e=>void save(`/api/assignments/${c.id}`,{actor_id:e.target.value},'PUT')}><option value="" disabled>Choose an actor</option>{data.actors.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div>)}</div>{!characters.length&&<p className="empty">Your characters will appear here.</p>}</Card>
-          </div>:<div className="script-layout"><section className="scene-panel"><div className="section-heading"><h2>Scenes <span className="count">{scenes.length}</span></h2><p>One chapter of the adventure at a time.</p></div><div className="scene-list">{scenes.map(s=><button disabled={busy} className={scene?.id===s.id?'scene selected':'scene'} key={s.id} onClick={()=>{setSceneID(s.id);setEditing(undefined);}}><span className="scene-number">{String(s.position).padStart(2,'0')}</span><span>{s.name}<small>{data.events.filter(l=>l.scene_id===s.id).length} lines</small></span></button>)}</div><NameForm label="Scene name" button="Add scene" disabled={busy} onSave={name=>save('/api/scenes',{name,project_id:projectID,position:Math.max(0,...scenes.map(s=>s.position))+1})}/></section>
-            <section className="script-panel">{scene?<><div className="script-heading"><div className="eyebrow">SCENE {String(scene.position).padStart(2,'0')}</div><h2>{scene.name}</h2><p>{lines.length} dialogue {lines.length===1?'line':'lines'} <span>•</span> Draft your next adventure</p></div>
+            <Card title="The people behind the voices" description="Actors are available across all your projects."><NameForm label="Actor name" button="Add actor" disabled={busy} onSave={name=>save('/api/actors',{name})}/><div className="actor-list">{data.actors.map(a=><div key={a.id}><span className="avatar">{a.name.slice(0,1)}</span><span className="actor-name">{a.name}</span><button className="text-button danger-text" disabled={busy} aria-label={`Remove actor ${a.name}`} onClick={()=>setRemoval({title:`Remove actor “${a.name}”?`,message:'All character assignments for this actor will be removed across every script. Characters and dialogue remain, and those roles become unassigned.',path:`/api/actors/${a.id}`})}>Remove</button></div>)}</div>{!data.actors.length&&<p className="empty">Add Hazel, Hannah, or anyone joining the story.</p>}</Card>
+            <Card title="Characters in this story" description="Give each role a name and choose who will play it."><NameForm label="Character name" button="Add character" disabled={busy} onSave={name=>save('/api/characters',{name,project_id:projectID})}/><div className="character-list">{characters.map(c=>{const count=data.events.filter(l=>l.character_id===c.id).length;return <div className="character-row" key={c.id}><div><strong>{c.name}</strong><small>{count?`${count} lines — reassign or delete them before removing this character.`:'No dialogue lines'}</small><button className="text-button danger-text" disabled={busy||count>0} aria-label={`Remove character ${c.name}`} onClick={()=>setRemoval({title:`Remove character “${c.name}”?`,message:'This character and its actor assignment will be removed. The actor remains available.',path:`/api/characters/${c.id}`})}>Remove</button></div><label>Played by<select aria-label={`Actor for ${c.name}`} disabled={busy||!data.actors.length} value={data.assignments.find(a=>a.character_id===c.id)?.actor_id||''} onChange={e=>void save(`/api/assignments/${c.id}`,{actor_id:e.target.value},'PUT')}><option value="" disabled>Unassigned</option>{data.actors.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div>})}</div>{!characters.length&&<p className="empty">Your characters will appear here.</p>}</Card>
+          </div>:<div className="script-layout"><section className="scene-panel"><div className="section-heading"><h2>Scenes <span className="count">{scenes.length}</span></h2><p>Drag the numbers to reorder scenes.</p></div><div className="scene-list"><SortList ids={scenes.map(s=>s.id)} onOrder={ids=>void reorder('scenes',ids)} busy={busy}>{scenes.map(s=><SortRow id={s.id} disabled={busy} kind="scene" number={s.position} selected={scene?.id===s.id} key={s.id} onClick={()=>{setSceneID(s.id);setEditing(undefined);}}><button disabled={busy} className="scene-title" onClick={()=>{setSceneID(s.id);setEditing(undefined);}}>{s.name}<small>{data.events.filter(l=>l.scene_id===s.id).length} lines</small></button></SortRow>)}</SortList></div><NameForm label="Scene name" button="Add scene" disabled={busy} onSave={name=>save('/api/scenes',{name,project_id:projectID,position:Math.max(0,...scenes.map(s=>s.position))+1})}/></section>
+            <section className="script-panel">{scene?<><div className="script-heading"><div className="tools-heading"><div className="eyebrow">SCENE {String(scene.position).padStart(2,'0')}</div><button className="text-button danger-text" disabled={busy} onClick={()=>setRemoval({title:`Remove scene “${scene.name}”?`,message:`This removes the scene and all ${lines.length} of its dialogue lines. Other scenes and the cast will remain.`,path:`/api/scenes/${scene.id}`})}>Remove scene</button></div><h2>{scene.name}</h2><p>{lines.length} dialogue {lines.length===1?'line':'lines'} <span>•</span> Click a line number to edit; drag it to reorder.</p></div>
               {!characters.length?<div className="empty"><p>Add a character before writing dialogue.</p><button className="secondary" onClick={()=>setTab('cast')}>Set up your cast</button></div>:<>
-                <div className="lines">{lines.map(l=><article className="dialogue" key={l.id}><span className="line-number">{String(l.position).padStart(2,'0')}</span><div><div className="line-meta"><strong>{characters.find(c=>c.id===l.character_id)?.name}</strong><span>{actorFor(l.character_id)||'Unassigned'} · {l.start_ms} ms</span></div><p className="dialogue-text">{l.text}</p>{l.direction&&<p className="direction">{l.direction}</p>}</div><button className="text-button" disabled={busy} aria-label={`Edit line ${l.position}`} onClick={()=>setEditing(l)}>Edit</button></article>)}</div>
+                <div className="lines"><SortList ids={lines.map(l=>l.id)} onOrder={ids=>void reorder('lines',ids)} busy={busy}>{lines.map(l=><SortRow id={l.id} disabled={busy} kind="line" number={l.position} key={l.id} onClick={()=>setEditing(l)}><div><div className="line-meta"><strong>{characters.find(c=>c.id===l.character_id)?.name}</strong><span>{actorFor(l.character_id)||'Unassigned'} · {l.start_ms} ms</span></div><p className="dialogue-text">{l.text}</p>{l.direction&&<p className="direction">{l.direction}</p>}</div><DeleteLine key={`${l.id}-${l.revision}`} number={l.position} busy={busy} onDelete={()=>void save(`/api/events/${l.id}`,{confirm:true,revision:l.revision},'DELETE')}/></SortRow>)}</SortList></div>
                 {!lines.length&&<p className="empty">A blank page, a world of possibilities. Write your first line below.</p>}
-                <LineForm key={editing?.id||`${scene.id}-${characters.map(c=>c.id).join()}`} line={editing} projectID={projectID} sceneID={scene.id} characters={characters} nextPosition={nextPosition} save={save} busy={busy} cancel={()=>setEditing(undefined)}/>
+                <div ref={editForm}><LineForm key={editing?.id||`${scene.id}-${characters.map(c=>c.id).join()}`} line={editing} projectID={projectID} sceneID={scene.id} characters={characters} nextPosition={nextPosition} save={save} busy={busy} cancel={()=>setEditing(undefined)}/></div>
               </>}</>:<div className="welcome"><span>02 / SET THE SCENE</span><h2>Where does your story begin?</h2><p>Add a scene to start writing dialogue.</p></div>}</section></div>}
         </>}
         <footer className="page-footer">Made for stories worth telling.<span>STORYFORGE / SCRIPT STUDIO</span></footer>
       </div>
     </main>
+    {removal&&<ConfirmDialog title={removal.title} busy={busy} onCancel={()=>setRemoval(undefined)} onConfirm={()=>void save(removal.path,{confirm:true},'DELETE')}><p>{removal.message}</p>{error&&<p role="alert" className="banner error">{error}</p>}</ConfirmDialog>}
   </div>;
 }
