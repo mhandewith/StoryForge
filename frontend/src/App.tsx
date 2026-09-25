@@ -29,7 +29,7 @@ function LineForm({line,projectID,sceneID,characters,nextPosition,save,busy,canc
       <div className="form-grid"><label>Character<select required value={character} onChange={e=>setCharacter(e.target.value)}><option value="" disabled>Choose a character</option>{characters.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
       <label>Line position<input type="number" required min={1} max={2147483647} step={1} value={position} onChange={e=>setPosition(e.target.valueAsNumber)}/></label>
       <label>Start time (ms)<input type="number" required min={0} max={86400000} step={1} value={start} onChange={e=>setStart(e.target.valueAsNumber)}/></label></div>
-      <label>Dialogue<textarea required maxLength={10000} rows={3} value={text} onChange={e=>setText(e.target.value)} placeholder="What does the character say?"/></label>
+      <label>Dialogue<textarea aria-label="Dialogue" required maxLength={10000} rows={3} value={text} onChange={e=>setText(e.target.value)} placeholder="What does the character say?"/></label>
       <label>Performance direction <span className="optional">optional</span><input maxLength={2000} value={direction} onChange={e=>setDirection(e.target.value)} placeholder="For example: quietly, with a little excitement"/></label>
       <p className="hint">Position controls reading order. Start time places the line on the future scene timeline; lines can share a start time.</p>
       <div className="actions"><button>{busy?'Saving…':line?'Save changes':'Add line'}</button>{line&&<button className="secondary" type="button" onClick={cancel}>Cancel</button>}</div>
