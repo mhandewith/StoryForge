@@ -1,0 +1,6 @@
+services:
+  backend:
+    image: storyforge:local
+    build:
+      context: .
+    pull_policy: build

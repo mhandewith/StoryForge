@@ -1,0 +1,14 @@
+services:
+  backend:
+    image: ghcr.io/mhandewith/storyforge:latest
+    container_name: storyforge
+    restart: unless-stopped
+    ports:
+      - "${STORYFORGE_PORT:-8088}:8080"
+    environment:
+      PORT: "8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
