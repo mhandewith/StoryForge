@@ -32,7 +32,7 @@ test('prepare a family scene, edit it, and reload it from PostgreSQL', async ({p
     'Then let’s find out who is there.', 'Ready? Take my hand.',
   ];
   for(let i=0;i<10;i++){
-    await page.getByLabel('Character',{exact:true}).selectOption({label:i%2?'Hannah':'Hazel'});
+    await page.getByRole('combobox',{name:'Character',exact:true}).selectOption({label:i%2?'Hannah':'Hazel'});
     await page.getByLabel('Dialogue',{exact:true}).fill(words[i]);
     await page.getByLabel('Performance direction').fill(i===0?'Quietly, with wonder':'');
     await page.getByRole('button',{name:'Add line',exact:true}).click();

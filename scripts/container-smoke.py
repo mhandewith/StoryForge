@@ -16,7 +16,8 @@ VOLUME = "storyforge-ci-data"
 
 
 def docker(*args, check=True):
-    return subprocess.run(["docker", *args], check=check, capture_output=True, text=True).stdout.strip()
+    result = subprocess.run(["docker", *args], check=check, capture_output=True, text=True)
+    return (result.stdout + (result.stderr if args[0] == "logs" else "")).strip()
 
 
 def api(path, body=None, method=None, expected=200):
@@ -53,6 +54,7 @@ def setup():
     os.environ["POSTGRES_PASSWORD"] = os.environ["PGPASSWORD"]
     # Carry the generated credential between CI steps without committing it or printing it.
     if os.environ.get("GITHUB_ENV"):
+        print("::add-mask::" + os.environ["PGPASSWORD"], flush=True)
         with open(os.environ["GITHUB_ENV"], "a") as env:
             env.write("PGPASSWORD=" + os.environ["PGPASSWORD"] + "\n")
     docker("network", "create", NETWORK)
