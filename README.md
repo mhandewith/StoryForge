@@ -2,9 +2,14 @@
 
 A collaborative script and voice studio for the family, with persistent scripts,
 tagged text import, drag-and-drop ordering, and safe removal controls.
-Recording and audio processing come next.
+Actors can now record, review, save, and replay their performances. Voice
+conversion and scene rendering come later.
 
-Deployed home-network address: **http://192.168.86.127:8088**.
+Secure application address: **https://storyforge.handewith.com**.
+Internal tunnel service: **http://192.168.86.127:8088**.
+
+**Upgrading to the actor studio?** Follow [the Unraid actor setup](docs/actor-studio-unraid.md)
+before updating: add the recording volume and Cloudflare login variables.
 
 ## What works
 
@@ -19,16 +24,23 @@ Deployed home-network address: **http://192.168.86.127:8088**.
 - Drag scene/line numbers to reorder; click a line number to edit.
 - Remove scenes, lines, actors, and unused characters; archive deleted scripts.
 - Reload saved data and retain it across application/database restarts.
+- Actor-specific Google login through verified Cloudflare Access tokens.
+- Record and listen locally, explicitly save multiple takes, replay history,
+  choose a preferred take, and track remaining lines.
+- Review actor submissions and progress as an administrator.
 - Preserve dialogue revisions for future recordings. Conflicting edits return a
   conflict instead of silently overwriting another editor's work.
 
 The React/TypeScript/Vite admin is served by the Go backend at the same address.
-PostgreSQL stores metadata. There is no recording, authentication, or audio storage
-in this milestone. The app is intended for the home network.
+PostgreSQL stores metadata. Original audio lives in persistent file storage.
+Cloudflare Access handles Google sign-in; StoryForge verifies the signed token's
+issuer, audience, signature, and expiry before authorizing each API request.
+Unconfigured authentication denies workspace access rather than opening an admin session.
 
 ## Upgrade the existing Unraid deployment
 
-For the **already-running deployment on `wikinet` with `postgresql15`**, keep all
+For the **already-running deployment on `wikinet` with `postgresql15`**, first
+complete [the actor studio configuration](docs/actor-studio-unraid.md), then keep all
 existing connection settings and the 8088 → 8080 port mapping. In Unraid's Docker
 tab, check for updates and update StoryForge (or use Force Update), then refresh
 the browser. The database migration runs automatically and preserves existing
@@ -110,8 +122,8 @@ use **Check for Updates / Update** (or **Force Update**) to pull the published
 image. The app waits up to 60 seconds for PostgreSQL and applies migrations
 automatically. Enable Autostart, with PostgreSQL before StoryForge.
 
-No app volume is required yet. All current records are in PostgreSQL's mapped
-directory. Do not delete that directory when recreating containers.
+The actor studio also requires its persistent recordings volume. Keep both the
+database and recording storage when recreating containers.
 
 ### 4. Acceptance test
 
@@ -253,6 +265,14 @@ The server defaults to port 8080 and `WEB_DIR=../frontend/dist`. For frontend
 hot reload, run `npm run dev` in `frontend`; Vite proxies API requests to
 the backend on 8080.
 
+Production authentication requires the Cloudflare variables shown in `.env.example`.
+The plain localhost URL does not carry a Cloudflare identity. For isolated automated
+development only, set `STORYFORGE_AUTH_MODE=development`, use a localhost
+`STORYFORGE_PUBLIC_ORIGIN`, and set a random `STORYFORGE_DEV_AUTH_TOKEN` of at least
+32 characters. Requests must send `Authorization: Bearer <token>` and
+`X-StoryForge-Dev-Email`. This mode must never be used on the public deployment.
+The CI suite creates its own random token and disposable audio/database volumes.
+
 ## Architecture and API
 
 - `backend/cmd/server`: HTTP lifecycle and static frontend serving.
@@ -265,6 +285,13 @@ the backend on 8080.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/workspace` | Consistent snapshot of projects, cast, scenes, and dialogue |
+| GET | `/api/session` | Verified login identity, role, actor mapping, recording availability |
+| GET/PUT | `/api/actor-logins`, `/api/actors/{id}/login` | Admin-managed actor email mappings |
+| GET | `/api/actor/workspace` | Actor's assigned scenes and nearby dialogue context |
+| GET | `/api/actor/takes` | Own takes; administrators can see all |
+| POST | `/api/actor/events/{id}/takes?revision=N` | Raw audio body, MIME type, and `X-Upload-ID` (32 lowercase hex characters) |
+| GET | `/api/actor/takes/{id}/audio` | Authorized, seekable playback of original audio |
+| PUT | `/api/actor/takes/{id}/preferred` | Set `preferred` boolean |
 | POST | `/api/projects` | Create project: `name` |
 | POST | `/api/actors` | Create actor: `name` |
 | POST | `/api/characters` | Create character: `project_id, name` |
@@ -308,8 +335,8 @@ build. The workflow uses GitHub's built-in token. Public package visibility
 allows Unraid downloads without credentials. For a private package, use
 `docker login ghcr.io -u mhandewith` and a classic token with `read:packages`.
 
-This milestone uses one actor per character. It does not yet provide actor
-recording, scene rendering, audio assets, archive browsing, or
+This milestone uses one actor per character. It does not yet provide
+scene rendering, voice conversion, archive browsing, or
 project/actor/character renaming.
 
 Official references:

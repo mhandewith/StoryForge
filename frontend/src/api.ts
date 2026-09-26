@@ -6,6 +6,7 @@ export type Workspace = {projects:Named[];actors:Named[];scenes:Scene[];characte
 export const empty:Workspace={projects:[],actors:[],scenes:[],characters:[],assignments:[],events:[]};
 export async function request<T>(path:string,method='GET',body?:unknown):Promise<T> {
   const response=await fetch(path,{method,headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+  if(!response.headers.get('content-type')?.includes('application/json'))throw new Error('Your login may have expired. Save or download any local recording before signing in again.');
   const data=await response.json();
   if(!response.ok) throw new Error(data.error||'Unable to save. Please try again.');
   return data as T;

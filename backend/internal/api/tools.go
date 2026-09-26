@@ -95,6 +95,9 @@ func (a *API) remove(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		case "actors":
+			if _, err := tx.Exec(ctx, "DELETE FROM actor_logins WHERE actor_id=$1", id); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, "DELETE FROM assignments WHERE actor_id=$1", id); err != nil {
 				return err
 			}

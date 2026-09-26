@@ -13,6 +13,13 @@ services:
       PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       PGDATABASE: storyforge
       PGSSLMODE: disable
+      STORYFORGE_PUBLIC_ORIGIN: "${STORYFORGE_PUBLIC_ORIGIN:-}"
+      CF_ACCESS_TEAM_DOMAIN: "${CF_ACCESS_TEAM_DOMAIN:-}"
+      CF_ACCESS_AUD: "${CF_ACCESS_AUD:-}"
+      STORYFORGE_ADMIN_EMAILS: "${STORYFORGE_ADMIN_EMAILS:-}"
+      STORYFORGE_RECORDINGS_DIR: /data/recordings
+    volumes:
+      - recordings:/data/recordings
     depends_on:
       db:
         condition: service_healthy
@@ -37,3 +44,4 @@ services:
       retries: 12
 volumes:
   postgres_data:
+  recordings:

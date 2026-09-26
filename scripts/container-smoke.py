@@ -1,5 +1,8 @@
 """Disposable Docker integration environment. Never points at the deployed server."""
 import json
+import io
+import wave
+import hashlib
 import os
 import secrets
 import subprocess
@@ -14,6 +17,7 @@ APP = "storyforge-ci-app"
 DB = "storyforge-ci-db"
 NETWORK = "storyforge-ci-net"
 VOLUME = "storyforge-ci-data"
+AUDIO_VOLUME = "storyforge-ci-recordings"
 
 
 def docker(*args, check=True):
@@ -21,9 +25,9 @@ def docker(*args, check=True):
     return (result.stdout + (result.stderr if args[0] == "logs" else "")).strip()
 
 
-def api(path, body=None, method=None, expected=200):
+def api(path, body=None, method=None, expected=200, email='admin@example.test'):
     request = urllib.request.Request(BASE + path, data=json.dumps(body).encode() if body is not None else None,
-                                     method=method, headers={"Content-Type": "application/json"})
+                                     method=method, headers={"Content-Type": "application/json",'Authorization':'Bearer '+os.environ['STORYFORGE_DEV_AUTH_TOKEN'],'X-StoryForge-Dev-Email':email})
     try:
         with urllib.request.urlopen(request, timeout=8) as response:
             status, raw = response.status, response.read()
@@ -45,6 +49,9 @@ def ready():
 
 def start_app():
     docker("run", "-d", "--name", APP, "--network", NETWORK, "-p", "127.0.0.1:18088:8080",
+           '-v',AUDIO_VOLUME+':/data/recordings','-e','STORYFORGE_RECORDINGS_DIR=/data/recordings',
+           '-e','STORYFORGE_AUTH_MODE=development','-e','STORYFORGE_DEV_AUTH_TOKEN',
+           '-e','STORYFORGE_PUBLIC_ORIGIN=http://127.0.0.1:18088','-e','STORYFORGE_ADMIN_EMAILS=admin@example.test',
            "-e", "PGHOST=" + DB, "-e", "PGUSER=storyforge", "-e", "PGDATABASE=storyforge",
            "-e", "PGSSLMODE=disable", "-e", "PGPASSWORD", os.environ["SMOKE_IMAGE"])
     ready()
@@ -53,13 +60,17 @@ def start_app():
 def setup():
     os.environ["PGPASSWORD"] = secrets.token_hex(24)
     os.environ["POSTGRES_PASSWORD"] = os.environ["PGPASSWORD"]
+    os.environ['STORYFORGE_DEV_AUTH_TOKEN']=secrets.token_hex(32)
     # Carry the generated credential between CI steps without committing it or printing it.
     if os.environ.get("GITHUB_ENV"):
         print("::add-mask::" + os.environ["PGPASSWORD"], flush=True)
+        print('::add-mask::'+os.environ['STORYFORGE_DEV_AUTH_TOKEN'],flush=True)
         with open(os.environ["GITHUB_ENV"], "a") as env:
             env.write("PGPASSWORD=" + os.environ["PGPASSWORD"] + "\n")
+            env.write('STORYFORGE_DEV_AUTH_TOKEN='+os.environ['STORYFORGE_DEV_AUTH_TOKEN']+'\n')
     docker("network", "create", NETWORK)
     docker("volume", "create", VOLUME)
+    docker('volume','create',AUDIO_VOLUME)
     docker("run", "-d", "--name", DB, "--network", NETWORK,
            "-v", VOLUME + ":/var/lib/postgresql/data", "-e", "POSTGRES_USER=postgres",
            "-e", "POSTGRES_DB=postgres", "-e", "POSTGRES_PASSWORD", "postgres:15-alpine")
@@ -123,6 +134,58 @@ INSERT INTO script_events(project_id,scene_id,character_id,text,position) VALUES
         assert b"<div id=\"root\">" in response.read()
     print("Database API checks passed: relations, assignments, validation, conflicts, overlap, revisions.")
     tools_checks()
+    recording_checks(project,char,scene,created,updated)
+
+
+def audio_request(path,body=None,method=None,expected=200,email='performer@example.test',extra=None):
+    headers={'Authorization':'Bearer '+os.environ['STORYFORGE_DEV_AUTH_TOKEN'],'X-StoryForge-Dev-Email':email}
+    headers.update(extra or {})
+    req=urllib.request.Request(BASE+path,data=body,method=method,headers=headers)
+    try:
+        with urllib.request.urlopen(req,timeout=30) as response:
+            status,raw=response.status,response.read()
+    except urllib.error.HTTPError as error:
+        status,raw=error.code,error.read()
+    assert status==expected,(path,status,raw[:500])
+    return raw
+
+
+def recording_checks(project,char,scene,created,updated):
+    actor=api('/api/actors',{'name':'Studio performer'},expected=201)
+    other=api('/api/actors',{'name':'Other performer'},expected=201)
+    api('/api/actors/'+actor['id']+'/login',{'email':'performer@example.test'},'PUT')
+    api('/api/actors/'+other['id']+'/login',{'email':'other@example.test'},'PUT')
+    api('/api/assignments/'+char['id'],{'actor_id':actor['id']},'PUT')
+    api('/api/workspace',expected=403,email='performer@example.test')
+    api('/api/projects',{'name':'Forbidden'},expected=403,email='performer@example.test')
+    api('/api/actor/workspace',expected=403,email='unknown@example.test')
+    workspace=api('/api/actor/workspace',email='performer@example.test')
+    assert len(workspace['projects'])==1 and workspace['projects'][0]['id']==project['id']
+    wav=io.BytesIO()
+    with wave.open(wav,'wb') as output:
+        output.setnchannels(1);output.setsampwidth(2);output.setframerate(16000);output.writeframes(b'\0\0'*16000)
+    body=wav.getvalue();path='/api/actor/events/'+created['id']+'/takes?revision='+str(updated['revision'])
+    headers={'Content-Type':'audio/wav','X-Upload-ID':'a'*32}
+    first=json.loads(audio_request(path,body,'POST',201,extra=headers))
+    retry=json.loads(audio_request(path,body,'POST',201,extra=headers));assert first['id']==retry['id']
+    second=json.loads(audio_request(path,body,'POST',201,extra=dict(headers,**{'X-Upload-ID':'b'*32})))
+    assert first['take_number']==1 and second['take_number']==2
+    audio_request(path,body,'POST',403,email='other@example.test',extra=headers)
+    audio_request(path,b'not audio','POST',400,extra=dict(headers,**{'X-Upload-ID':'c'*32}))
+    audio_request(path,body,'POST',403,extra=dict(headers,Origin='https://evil.example'))
+    audio_request('/api/actor/events/'+created['id']+'/takes?revision=1',body,'POST',409,extra=dict(headers,**{'X-Upload-ID':'d'*32}))
+    audio_request('/api/actor/takes/'+first['id']+'/audio',expected=404,email='other@example.test')
+    raw=audio_request('/api/actor/takes/'+first['id']+'/audio');assert raw==body
+    partial=audio_request('/api/actor/takes/'+first['id']+'/audio',expected=206,extra={'Range':'bytes=0-9'});assert partial==body[:10]
+    takes=api('/api/actor/takes',email='performer@example.test')
+    assert takes[0]['sha256']==hashlib.sha256(body).hexdigest() and takes[0]['duration_ms']==1000
+    api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',email='performer@example.test')
+    takes=api('/api/actor/takes',email='performer@example.test');assert [t['id'] for t in takes if t['preferred']]==[second['id']]
+    api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',expected=404,email='other@example.test')
+    api('/api/events/'+created['id'],dict(project_id=project['id'],scene_id=scene['id'],character_id=char['id'],text='Changed after recording.',direction='',position=1,start_ms=0,revision=updated['revision']),'PUT')
+    assert all(t['stale'] for t in api('/api/actor/takes',email='performer@example.test'))
+    assert audio_request('/api/actor/takes/'+first['id']+'/audio')==body
+    print('Actor permissions, source checksums, multiple takes, upload retries, playback ranges, preference and stale revisions passed.')
 
 
 def tools_checks():
@@ -199,12 +262,16 @@ Goodbye.'''
 
 def restart():
     before = api("/api/workspace")
+    takes_before=api('/api/actor/takes')
+    audio_before={t['id']:hashlib.sha256(audio_request('/api/actor/takes/'+t['id']+'/audio',email='admin@example.test')).hexdigest() for t in takes_before}
     docker("stop", APP)
     assert docker("inspect", "--format={{.State.ExitCode}}", APP) == "0"
     docker("rm", APP)
     docker("restart", DB)
     start_app()  # reruns migrations without recreating or duplicating data
     assert api("/api/workspace") == before, "Records changed after restart"
+    assert api('/api/actor/takes')==takes_before
+    assert {t['id']:hashlib.sha256(audio_request('/api/actor/takes/'+t['id']+'/audio',email='admin@example.test')).hexdigest() for t in takes_before}==audio_before
     docker("stop", DB)
     api("/readyz", expected=503)
     assert api("/healthz")["status"] == "ok"
@@ -219,6 +286,7 @@ def cleanup():
         print(docker("logs", name, check=False))
         docker("rm", "-f", name, check=False)
     docker("volume", "rm", VOLUME, check=False)
+    docker('volume','rm',AUDIO_VOLUME,check=False)
     docker("network", "rm", NETWORK, check=False)
 
 

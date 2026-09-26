@@ -15,9 +15,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mhandewith/StoryForge/backend/internal/identity"
 )
 
-type API struct{ DB *pgxpool.Pool }
+type API struct {
+	DB            *pgxpool.Pool
+	Auth          *identity.Auth
+	RecordingsDir string
+}
 
 func JSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -64,6 +69,7 @@ func validText(s string, limit int) bool {
 }
 
 func (a *API) Register(mux *http.ServeMux) {
+	a.registerRecording(mux)
 	a.registerTools(mux)
 	mux.HandleFunc("GET /api/workspace", a.workspace)
 	mux.HandleFunc("POST /api/projects", a.createProject)
