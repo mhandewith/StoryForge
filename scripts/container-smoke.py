@@ -92,6 +92,15 @@ INSERT INTO script_events(project_id,scene_id,character_id,text,position) VALUES
     other_char = api("/api/characters", {"name": "Other guide", "project_id": other["id"]}, expected=201)
     scene = api("/api/scenes", {"name": "Forest", "position": 1, "project_id": project["id"]}, expected=201)
     api("/api/assignments/" + char["id"], {"actor_id": actor["id"]}, "PUT")
+    voice_path = '/api/characters/' + char['id'] + '/target-voice'
+    assert char['target_voice'] == ''
+    assert api(voice_path, {'target_voice':'Wolf'}, 'PUT')['target_voice'] == 'Wolf'
+    assert api(voice_path, {'target_voice':''}, 'PUT')['target_voice'] == ''
+    api(voice_path, {'target_voice':'x'*121}, 'PUT', expected=400)
+    api(voice_path, {'target_voice':'Wolf'}, 'PUT')
+    voice_snapshot = api('/api/workspace')
+    assert next(c for c in voice_snapshot['characters'] if c['id']==char['id'])['target_voice']=='Wolf'
+    assert next(a for a in voice_snapshot['assignments'] if a['character_id']==char['id'])['actor_id']==actor['id']
     line = {"project_id": project["id"], "scene_id": scene["id"], "character_id": char["id"],
             "text": "Welcome home.", "direction": "Warmly", "position": 1, "start_ms": 0}
     created = api("/api/events", line, expected=201)

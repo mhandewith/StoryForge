@@ -11,6 +11,9 @@ Deployed home-network address: **http://192.168.86.127:8088**.
 - Create projects and ordered scenes.
 - Create reusable actors (Hazel, Hannah, Dad) and characters within each project.
 - Assign an actor to each character.
+- Save an optional target voice per character, independently of the actor (for
+  example, Played by Dad / Target voice Wolf). This is a voice label for future
+  ElevenLabs conversion; no conversion or ElevenLabs connection happens yet.
 - Create and edit ordered dialogue, performance directions, and start times.
 - Import a tagged text file with a preview, automatically creating scenes and cast.
 - Drag scene/line numbers to reorder; click a line number to edit.
@@ -267,6 +270,7 @@ the backend on 8080.
 | POST | `/api/characters` | Create character: `project_id, name` |
 | POST | `/api/scenes` | Create scene: `project_id, name, position` |
 | PUT | `/api/assignments/{character_id}` | Assign/reassign role: `actor_id` |
+| PUT | `/api/characters/{character_id}/target-voice` | Set optional `target_voice` label (up to 120 characters); empty string clears it |
 | POST | `/api/events` | Create dialogue |
 | PUT | `/api/events/{id}` | Edit dialogue with current `revision` |
 | POST | `/api/import/preview` | Validate tagged `text`, return preview without saving |

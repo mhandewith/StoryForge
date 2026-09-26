@@ -70,6 +70,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/actors", a.createActor)
 	mux.HandleFunc("POST /api/scenes", a.createScene)
 	mux.HandleFunc("POST /api/characters", a.createCharacter)
+	mux.HandleFunc("PUT /api/characters/{characterID}/target-voice", a.targetVoice)
 	mux.HandleFunc("PUT /api/assignments/{characterID}", a.assign)
 	mux.HandleFunc("POST /api/events", a.createEvent)
 	mux.HandleFunc("PUT /api/events/{eventID}", a.updateEvent)
@@ -199,6 +200,21 @@ func (a *API) createCharacter(w http.ResponseWriter, r *http.Request) {
 	}
 	a.row(w, r, 201, `INSERT INTO characters(project_id,name) SELECT id,$2 FROM active_projects WHERE id=$1 RETURNING row_to_json(characters)`, in.ProjectID, in.Name)
 }
+func (a *API) targetVoice(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TargetVoice string `json:"target_voice"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	in.TargetVoice = strings.TrimSpace(in.TargetVoice)
+	if !validID(r.PathValue("characterID")) || utf8.RuneCountInString(in.TargetVoice) > 120 || strings.ContainsRune(in.TargetVoice, 0) {
+		problem(w, 400, "Enter a target voice of up to 120 characters.")
+		return
+	}
+	a.row(w, r, 200, `UPDATE characters SET target_voice=$2 WHERE id=$1 AND id IN (SELECT id FROM active_characters) RETURNING row_to_json(characters)`, r.PathValue("characterID"), in.TargetVoice)
+}
+
 func (a *API) assign(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ActorID string `json:"actor_id"`
