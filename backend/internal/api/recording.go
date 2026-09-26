@@ -21,6 +21,8 @@ import (
 )
 
 func (a *API) registerRecording(m *http.ServeMux) {
+	m.HandleFunc("POST /api/actor/scenes/{id}/preview", a.renderScene)
+	m.HandleFunc("GET /api/actor/scenes/{id}/preview/{key}", a.sceneAudio)
 	m.HandleFunc("GET /api/session", a.session)
 	m.HandleFunc("GET /api/actor-logins", a.actorLogins)
 	m.HandleFunc("PUT /api/actors/{id}/login", a.setActorLogin)

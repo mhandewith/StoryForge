@@ -13,7 +13,7 @@ COPY backend/ ./
 RUN go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/storyforge ./cmd/server
 
 FROM alpine:3.23
-RUN apk add --no-cache ffmpeg ca-certificates && addgroup -g 10001 -S storyforge && adduser -u 10001 -S -G storyforge storyforge \
+RUN apk add --no-cache ffmpeg espeak-ng ca-certificates && addgroup -g 10001 -S storyforge && adduser -u 10001 -S -G storyforge storyforge \
     && mkdir -p /data/recordings && chown -R storyforge:storyforge /data
 COPY --from=build /out/storyforge /usr/local/bin/storyforge
 COPY --from=frontend /frontend/dist /app/web

@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import App from './App';
+import {ScenePreview} from './ScenePreview';
 import {empty,request,type Workspace,type Line} from './api';
 import './studio.css';
 
@@ -70,7 +71,8 @@ function Recorder({line,enabled,onSaved,onDirty}:{line:Line;enabled:boolean;onSa
 
 function ActorStudio({session,onAdmin}:{session:Session;onAdmin:()=>void}){
  const [data,setData]=useState<Workspace>(empty);const [takes,setTakes]=useState<Take[]>([]);const [sceneID,setSceneID]=useState('');const [lineID,setLineID]=useState('');const [error,setError]=useState('');const [loading,setLoading]=useState(true);const [history,setHistory]=useState(false);const dirty=useRef(false);
- const markDirty=useRef((value:boolean)=>{dirty.current=value;}).current;
+ const [recordingDirty,setRecordingDirty]=useState(false);
+ const markDirty=useRef((value:boolean)=>{dirty.current=value;setRecordingDirty(value);}).current;
  async function loadTakes(){setTakes(await request<Take[]>('/api/actor/takes'));}
  useEffect(()=>{Promise.all([request<Workspace>('/api/actor/workspace'),request<Take[]>('/api/actor/takes')]).then(([w,t])=>{setData(w);setTakes(t);}).catch(e=>setError(errorMessage(e))).finally(()=>setLoading(false));},[]);
  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
@@ -83,6 +85,7 @@ function ActorStudio({session,onAdmin}:{session:Session;onAdmin:()=>void}){
  {error&&<p className="banner error" role="alert">{error}</p>}{loading?<p>Finding your parts…</p>:!session.user.actor_id?<div className="studio-empty"><h2>Your studio is almost ready.</h2><p>Ask Dad to link <strong>{session.user.email}</strong> to your actor under Cast & characters.</p></div>:<>
  <div className="actor-navigation"><button className="secondary" onClick={()=>leave(()=>{setSceneID('');setHistory(false);})}>My scenes</button><button className="secondary" onClick={()=>leave(()=>{setSceneID('');setHistory(true);})}>My saved takes ({ownTakes.length})</button></div>
  {history?<section><h2>Your performances</h2>{!ownTakes.length&&<p>No saved takes yet. Your first performance can start in My scenes.</p>}{ownTakes.map(t=><div key={t.id} className="history-entry"><h3>{t.project_name} · {t.scene_name} · {t.character_name}</h3><p>{t.text}</p><TakeCard take={t} onPreferred={loadTakes}/></div>)}</section>:!scene?<div className="scene-cards">{!data.scenes.length&&<div className="studio-empty"><h2>A part is on its way.</h2><p>Once your character has dialogue, your scenes will appear here.</p></div>}{data.scenes.map(s=>{const part=mine.filter(l=>l.scene_id===s.id),done=part.filter(saved).length;return <button className="scene-card" key={s.id} onClick={()=>{setSceneID(s.id);setLineID(part.find(l=>!saved(l))?.id||part[0]?.id||'');}}><span>{data.projects.find(p=>p.id===s.project_id)?.name}</span><h2>{s.name}</h2><p>{Array.from(new Set(part.map(l=>char(l.character_id)))).join(' · ')}</p><progress value={done} max={part.length||1}/><strong>{done===part.length?'All lines have a take!':`${part.length-done} lines waiting for your voice`}</strong><small>{done} of {part.length} lines recorded</small></button>})}</div>:line?<>
+ <ScenePreview sceneID={scene.id} version={JSON.stringify([context,takes])} disabled={recordingDirty}/>
  <div className="line-progress"><span>{lines.filter(saved).length} of {lines.length} lines recorded</span><progress value={lines.filter(saved).length} max={lines.length}/></div>
  <div className="actor-line-picker" aria-label="Your dialogue lines">{lines.map((l,i)=><button key={l.id} className={l.id===line.id?'current':'secondary'} aria-label={`Read your line ${i+1}`} onClick={()=>leave(()=>setLineID(l.id))}>{i+1}{saved(l)?' ✓':''}</button>)}</div>
  <section className="performance-card"><div className="performance-label"><span>YOU ARE {char(line.character_id)}</span><span>Your line {lines.indexOf(line)+1} of {lines.length}</span></div>{line.direction&&<div className="performance-direction"><strong>How to say it</strong><p>{line.direction}</p></div>}<p className="performance-text">{line.text}</p><details className="surrounding-lines"><summary>What happens around this line?</summary>{context.slice(Math.max(0,index-1),index+2).filter(e=>e.id!==line.id).map(e=><p key={e.id}><strong>{char(e.character_id)}:</strong> {e.text}</p>)}</details><Recorder key={line.id+'-'+line.revision} line={line} enabled={session.recording_enabled} onSaved={loadTakes} onDirty={markDirty}/></section>

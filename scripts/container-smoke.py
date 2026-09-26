@@ -29,7 +29,7 @@ def api(path, body=None, method=None, expected=200, email='admin@example.test'):
     request = urllib.request.Request(BASE + path, data=json.dumps(body).encode() if body is not None else None,
                                      method=method, headers={"Content-Type": "application/json",'Authorization':'Bearer '+os.environ['STORYFORGE_DEV_AUTH_TOKEN'],'X-StoryForge-Dev-Email':email})
     try:
-        with urllib.request.urlopen(request, timeout=8) as response:
+        with urllib.request.urlopen(request, timeout=90) as response:
             status, raw = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, raw = error.code, error.read()
@@ -161,6 +161,17 @@ def recording_checks(project,char,scene,created,updated):
     api('/api/actor/workspace',expected=403,email='unknown@example.test')
     workspace=api('/api/actor/workspace',email='performer@example.test')
     assert len(workspace['projects'])==1 and workspace['projects'][0]['id']==project['id']
+    preview_path='/api/actor/scenes/'+scene['id']+'/preview'
+    guest=api('/api/characters',{'name':'Preview guest','project_id':project['id']},expected=201)
+    api('/api/events',{'project_id':project['id'],'scene_id':scene['id'],'character_id':guest['id'],'text':'A different role joins the scene.','direction':'Do not read this instruction aloud.','position':3,'start_ms':0},expected=201)
+    synthetic=api(preview_path,{},'POST',email='performer@example.test')
+    assert synthetic['synthetic_lines']==3 and synthetic['recorded_lines']==0
+    original_preview=audio_request(synthetic['url'])
+    assert len(original_preview)>1000
+    assert audio_request(synthetic['url'],expected=206,extra={'Range':'bytes=0-9'})==original_preview[:10]
+    api(preview_path,{},'POST',expected=404,email='other@example.test')
+    audio_request(synthetic['url'],expected=404,email='other@example.test')
+    assert api(preview_path,{},'POST')['url']==synthetic['url'], 'Unchanged preview was not reused'
     wav=io.BytesIO()
     with wave.open(wav,'wb') as output:
         output.setnchannels(1);output.setsampwidth(2);output.setframerate(16000);output.writeframes(b'\0\0'*16000)
@@ -181,10 +192,21 @@ def recording_checks(project,char,scene,created,updated):
     assert takes[0]['sha256']==hashlib.sha256(body).hexdigest() and takes[0]['duration_ms']==1000
     api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',email='performer@example.test')
     takes=api('/api/actor/takes',email='performer@example.test');assert [t['id'] for t in takes if t['preferred']]==[second['id']]
+    mixed=api(preview_path,{},'POST',email='performer@example.test')
+    assert mixed['recorded_lines']==1 and mixed['url']!=synthetic['url']
+    assert audio_request(mixed['url'])!=original_preview
+    api('/api/actor/takes/'+first['id']+'/preferred',{'preferred':True},'PUT',email='performer@example.test')
+    assert api(preview_path,{},'POST')['url']!=mixed['url'], 'Preferred take did not invalidate preview'
     api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',expected=404,email='other@example.test')
     api('/api/events/'+created['id'],dict(project_id=project['id'],scene_id=scene['id'],character_id=char['id'],text='Changed after recording.',direction='',position=1,start_ms=0,revision=updated['revision']),'PUT')
     assert all(t['stale'] for t in api('/api/actor/takes',email='performer@example.test'))
     assert audio_request('/api/actor/takes/'+first['id']+'/audio')==body
+    stale=api(preview_path,{},'POST')
+    assert stale['recorded_lines']==0 and stale['url']!=mixed['url'], 'Outdated take used in preview'
+    api('/api/assignments/'+char['id'],{'actor_id':other['id']},'PUT')
+    audio_request(stale['url'],expected=404)
+    api(preview_path,{},'POST',expected=404,email='performer@example.test')
+    api('/api/assignments/'+char['id'],{'actor_id':actor['id']},'PUT')
     print('Actor permissions, source checksums, multiple takes, upload retries, playback ranges, preference and stale revisions passed.')
 
 

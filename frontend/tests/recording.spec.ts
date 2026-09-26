@@ -44,6 +44,12 @@ test('an actor records, previews, saves multiple takes and replays history',asyn
  await expect(page.locator('.take-card')).toHaveCount(2);
  await page.locator('.take-card').first().getByRole('button',{name:'☆ Make preferred'}).click();
  await expect(page.locator('.take-card').first().getByRole('button',{name:'★ Preferred take'})).toBeVisible();
+ await page.getByRole('button',{name:'Generate scene preview',exact:true}).click();
+ await expect(page.getByLabel('Whole scene preview')).toContainText('1 recorded · 1 computer-voiced lines',{timeout:90000});
+ const wholeScene=page.getByLabel('Play whole scene');
+ await wholeScene.evaluate((el:HTMLAudioElement)=>el.play());
+ await expect.poll(()=>wholeScene.evaluate((el:HTMLAudioElement)=>el.currentTime)).toBeGreaterThan(0);
+ await wholeScene.evaluate((el:HTMLAudioElement)=>el.pause());
  await page.setViewportSize({width:1365,height:1000});
  await page.screenshot({path:'test-results/actor-studio-desktop.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});

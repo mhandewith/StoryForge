@@ -5,7 +5,7 @@ tagged text import, drag-and-drop ordering, and safe removal controls.
 Actors can now record, review, save, and replay their performances. Voice
 conversion and scene rendering come later.
 
-Secure application address: **https://storyforge.handewith.com**.
+Secure application address: **https://storyforge.handewith.family**.
 Internal tunnel service: **http://192.168.86.127:8088**.
 
 **Upgrading to the actor studio?** Follow [the Unraid actor setup](docs/actor-studio-unraid.md)
@@ -343,3 +343,5 @@ Official references:
 [Unraid container settings](https://docs.unraid.net/unraid-os/using-unraid-to/run-docker-containers/managing-and-customizing-containers/),
 [PostgreSQL image](https://hub.docker.com/_/postgres),
 [GitHub registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+Whole-scene audio: [server-generated scene previews](docs/scene-previews.md).

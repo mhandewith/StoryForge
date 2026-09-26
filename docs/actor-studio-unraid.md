@@ -31,7 +31,7 @@ the Key must exactly match the name below.
 
 | Key | Value |
 | --- | --- |
-| `STORYFORGE_PUBLIC_ORIGIN` | `https://storyforge.handewith.com` |
+| `STORYFORGE_PUBLIC_ORIGIN` | `https://storyforge.handewith.family` |
 | `CF_ACCESS_TEAM_DOMAIN` | `https://handewith.cloudflareaccess.com` |
 | `CF_ACCESS_AUD` | `c0a32fcdfc92e457efc5142804205eb6e06b547f2a6708e56ec5855ee2e9d048` |
 | `STORYFORGE_ADMIN_EMAILS` | Your Google login email; comma-separated if more than one administrator |
@@ -47,7 +47,7 @@ fails with a recording-storage message rather than accepting unsaved uploads.
 
 ## 3. Link the actors
 
-1. Open **https://storyforge.handewith.com**, signing in with the administrator
+1. Open **https://storyforge.handewith.family**, signing in with the administrator
    Google account you entered above.
 2. In **Cast & characters**, enter each actor's Google email and choose **Save login**.
 3. Assign each character to its actor using **Played by**.
