@@ -58,8 +58,11 @@ Goodnight.`;
   // Keyboard and pointer scene moves both persist; selected scene stays selected.
   const sceneHandle=page.getByRole('button',{name:'Select or move scene 1',exact:true});
   await sceneHandle.focus();
-  await page.keyboard.press('Space');
-  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Space',{delay:100});
+  await expect(sceneHandle).toHaveAttribute('aria-pressed','true');
+  await page.keyboard.press('ArrowDown',{delay:100});
+  const targetID=await page.locator('.scene-row').nth(1).getAttribute('data-sort-id');
+  await expect(page.locator('.scene-list [role="status"]')).toContainText(`over droppable area ${targetID}`);
   await page.keyboard.press('Space');
   await expect(page.locator('.scene-title')).toHaveText(['Dusk1 lines','Dawn3 lines']);
   await expect(page.locator('.script-heading h2')).toHaveText('Dawn');
