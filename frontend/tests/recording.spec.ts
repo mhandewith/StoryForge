@@ -15,6 +15,7 @@ test('an actor records, previews, saves multiple takes and replays history',asyn
  await page.goto('/');
  await expect(page.getByRole('heading',{level:1})).toContainText('Hazel recording test');
  await expect(page.getByRole('button',{name:'Manage scripts',exact:true})).toHaveCount(0);
+ await expect(page.getByLabel('Change actor')).toHaveCount(0);
  await page.getByRole('button',{name:/The brave little wolf/}).click();
  await expect(page.locator('.performance-text')).toHaveText('I can be brave, even when the forest feels big.');
  await expect(page.locator('.performance-direction')).toContainText('Start quietly');

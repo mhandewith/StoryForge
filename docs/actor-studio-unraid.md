@@ -83,6 +83,20 @@ see progress, and change preferences. Recording is designed for Chrome on
 Windows and Android. Real microphones and Android permission behavior should
 be checked on the girls' devices; automated tests use Chromium's simulated mic.
 
+## Shared phone: change actor
+
+An administrator can open **Recording studio** and use **Change actor** to choose
+Hannah, Hazel, or any active actor. Their assigned scenes and saved takes appear,
+and new recordings are saved under that actor. The actor does not need a Google
+email linked to use the administrator's device. Existing Google login mappings
+are unchanged. Switching away from an unsaved recording asks before discarding it.
+
+The actor choice lasts while this recording studio is open. Returning to the
+admin workspace or refreshing resets it to the administrator's linked actor (or
+asks you to choose one). This remains an administrator session with access to
+Manage scripts; it is a shared-device convenience, not a restricted child login.
+Regular actor accounts cannot switch actors.
+
 Recordings stop automatically before five minutes; uploads are limited to 25 MB.
 The backend checks the audio and stores the original bytes with a SHA-256 hash.
 There is no ElevenLabs conversion, scene mixing, or automatic source deletion.

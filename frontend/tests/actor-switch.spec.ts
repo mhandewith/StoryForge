@@ -1,0 +1,51 @@
+import {test,expect} from '@playwright/test';
+
+test('administrator changes actors without mixing recordings or discarding unsaved takes',async({page,request})=>{
+ test.setTimeout(90000);
+ const post=async(path:string,data:unknown)=>{const response=await request.post(path,{data});expect(response.ok()).toBeTruthy();return response.json();};
+ const project=await post('/api/projects',{name:'Shared phone story'});
+ const cast=[];
+ for(const [i,name] of ['Hannah shared phone','Hazel shared phone'].entries()){
+  const actor=await post('/api/actors',{name});
+  const character=await post('/api/characters',{name:`Role ${i}`,project_id:project.id});
+  const scene=await post('/api/scenes',{name:`Phone scene ${i}`,project_id:project.id,position:i+1});
+  expect((await request.put(`/api/assignments/${character.id}`,{data:{actor_id:actor.id}})).ok()).toBeTruthy();
+  const line=await post('/api/events',{project_id:project.id,scene_id:scene.id,character_id:character.id,text:`This is ${name}'s line.`,direction:'Cheerfully',position:1,start_ms:0});
+  cast.push({actor,scene,line});
+ }
+ await page.context().grantPermissions(['microphone']);
+ await page.goto('/');
+ await page.getByRole('button',{name:'Recording studio',exact:true}).click();
+ await page.getByLabel('Change actor').selectOption(cast[0].actor.id);
+ await expect(page.locator('.actor-switcher')).toContainText('Recording as Hannah shared phone');
+ await expect(page.getByRole('button',{name:/Phone scene 1/})).toHaveCount(0);
+ await page.getByRole('button',{name:/Phone scene 0/}).click();
+ await page.getByRole('button',{name:'● Record',exact:true}).click();
+ await expect(page.locator('.recording-state')).toContainText('0:01');
+ await page.getByRole('button',{name:'■ Stop recording'}).click();
+ await expect(page.getByLabel('Listen to your new take')).toBeVisible();
+ page.once('dialog',d=>d.dismiss());
+ await page.getByLabel('Change actor').selectOption(cast[1].actor.id);
+ await expect(page.getByLabel('Change actor')).toHaveValue(cast[0].actor.id);
+ await expect(page.getByLabel('Listen to your new take')).toBeVisible();
+ await page.getByRole('button',{name:'Save take',exact:true}).click();
+ await expect(page.locator('.take-card')).toHaveCount(1);
+ const takes=await (await request.get('/api/actor/takes')).json();
+ expect(takes.find((t:{event_id:string})=>t.event_id===cast[0].line.id).actor_id).toBe(cast[0].actor.id);
+ await page.getByLabel('Change actor').selectOption(cast[1].actor.id);
+ await expect(page.locator('.actor-switcher')).toContainText('Recording as Hazel shared phone');
+ await expect(page.getByRole('button',{name:/Phone scene 0/})).toHaveCount(0);
+ await page.getByRole('button',{name:/Phone scene 1/}).click();
+ await expect(page.locator('.performance-text')).toContainText('Hazel shared phone');
+ await expect(page.locator('.take-card')).toHaveCount(0);
+ await page.getByRole('button',{name:'● Record',exact:true}).click();
+ await expect(page.locator('.recording-state')).toContainText('0:01');
+ await page.getByRole('button',{name:'■ Stop recording'}).click();
+ await page.getByRole('button',{name:'Save take',exact:true}).click();
+ await expect(page.locator('.take-card')).toHaveCount(1);
+ const updated=await (await request.get('/api/actor/takes')).json();
+ expect(updated.find((t:{event_id:string})=>t.event_id===cast[1].line.id).actor_id).toBe(cast[1].actor.id);
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
+ await page.screenshot({path:'test-results/actor-switch-mobile.png',fullPage:true});
+});

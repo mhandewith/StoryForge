@@ -36,6 +36,27 @@ func (a *API) Protect(next http.Handler) http.Handler {
 			a.failure(w, err)
 			return
 		}
+		if actor := r.URL.Query().Get("as_actor"); actor != "" {
+			if !u.Admin {
+				problem(w, 403, "Only administrators can change actors.")
+				return
+			}
+			if !strings.HasPrefix(r.URL.Path, "/api/actor/") || !validID(actor) {
+				problem(w, 400, "Choose an actor in the recording studio.")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			err = a.DB.QueryRow(ctx, `SELECT id::text,name FROM active_actors WHERE id=$1`, actor).Scan(&u.ActorID, &u.Name)
+			cancel()
+			if errors.Is(err, pgx.ErrNoRows) {
+				problem(w, 404, "This actor is no longer available.")
+				return
+			}
+			if err != nil {
+				a.failure(w, err)
+				return
+			}
+		}
 		if r.URL.Path != "/api/session" && !strings.HasPrefix(r.URL.Path, "/api/actor/") && !u.Admin {
 			problem(w, 403, "Administrator access is required.")
 			return

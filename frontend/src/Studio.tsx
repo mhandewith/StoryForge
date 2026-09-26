@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import App from './App';
 import {ScenePreview} from './ScenePreview';
-import {empty,request,type Workspace,type Line} from './api';
+import {empty,request,type Workspace,type Line,type Named} from './api';
 import './studio.css';
 
 export type Session={user:{email:string;admin:boolean;actor_id:string;name:string};recording_enabled:boolean};
@@ -13,7 +13,21 @@ export default function Studio(){
  if(!session)return <div className="studio-gate"><div className="eyebrow">STORYFORGE</div><h1>{error?'Let’s get you signed in.':'Opening your studio…'}</h1>{error&&<><p role="alert">{error}</p><p>Use the secure StoryForge address and your Google account.</p><button onClick={()=>location.reload()}>Try again</button></>}</div>;
  if(mode==='admin'&&session.user.admin)return <App onStudio={()=>setMode('actor')} onReview={()=>setMode('review')}/>;
  if(mode==='review'&&session.user.admin)return <Review onBack={()=>setMode('admin')}/>;
- return <ActorStudio session={session} onAdmin={()=>setMode('admin')}/>;
+ return session.user.admin?<AdminRecordingStudio session={session} onAdmin={()=>setMode('admin')}/>:<ActorStudio session={session} onAdmin={()=>setMode('admin')}/>;
+}
+
+function AdminRecordingStudio({session,onAdmin}:{session:Session;onAdmin:()=>void}) {
+ const [actors,setActors]=useState<Named[]>([]);
+ const [actor,setActor]=useState<Named>({id:session.user.actor_id||'',name:session.user.name||''});
+ const [error,setError]=useState('');
+ useEffect(()=>{request<Workspace>('/api/workspace').then(w=>setActors(w.actors)).catch(e=>setError(errorMessage(e)));},[]);
+ if(error)return <div className="studio-gate"><p role="alert">{error}</p><button onClick={onAdmin}>Manage scripts</button></div>;
+ const selected={...session,user:{...session.user,actor_id:actor.id,name:actor.name}};
+ return <ActorStudio key={actor.id} session={selected} onAdmin={onAdmin} actors={actors} onActor={setActor}/>;
+}
+
+function asActor(path:string,actorID?:string) {
+ return actorID?`${path}${path.includes('?')?'&':'?'}as_actor=${encodeURIComponent(actorID)}`:path;
 }
 
 export function ActorEmail({id,name,busy}:{id:string;name:string;busy:boolean}){
@@ -29,7 +43,7 @@ function TakeCard({take,onPreferred}:{take:Take;onPreferred:()=>Promise<void>}){
  return <article className="take-card"><div className="take-heading"><strong>Take {take.take_number}</strong><span>{new Date(take.created_at).toLocaleString()} · {(take.duration_ms/1000).toFixed(1)}s</span>{take.stale&&<span className="old-take">Earlier script version</span>}</div><audio controls preload="none" src={`/api/actor/takes/${take.id}/audio`} aria-label={`Play take ${take.take_number}`} onPlay={e=>{const current=e.currentTarget;document.querySelectorAll('audio').forEach(a=>{if(a!==current)a.pause();});}}/><button className={take.preferred?'preferred':'secondary'} disabled={busy} onClick={prefer}>{take.preferred?'★ Preferred take':'☆ Make preferred'}</button>{take.stale&&<details><summary>Words recorded for this take</summary><p>{take.text}</p>{take.direction&&<p>{take.direction}</p>}</details>}{error&&<p role="alert">{error}</p>}</article>;
 }
 
-function Recorder({line,enabled,onSaved,onDirty}:{line:Line;enabled:boolean;onSaved:()=>Promise<void>;onDirty:(dirty:boolean)=>void}){
+function Recorder({line,enabled,onSaved,onDirty,actorID}:{line:Line;enabled:boolean;onSaved:()=>Promise<void>;onDirty:(dirty:boolean)=>void;actorID?:string}){
  const [phase,setPhase]=useState<'idle'|'asking'|'recording'|'preview'|'uploading'|'saved'>('idle');const [blob,setBlob]=useState<Blob>();const [url,setURL]=useState('');const [seconds,setSeconds]=useState(0);const [error,setError]=useState('');
  const media=useRef<MediaRecorder | undefined>(undefined);const stream=useRef<MediaStream | undefined>(undefined);const chunks=useRef<Blob[]>([]);const alive=useRef(true);const uploadID=useRef('');const started=useRef(0);const ticker=useRef<ReturnType<typeof setInterval> | undefined>(undefined);const bytes=useRef(0);
  function stop(){if(media.current?.state==='recording')media.current.stop();stream.current?.getTracks().forEach(t=>t.stop());clearInterval(ticker.current);}
@@ -55,7 +69,7 @@ function Recorder({line,enabled,onSaved,onDirty}:{line:Line;enabled:boolean;onSa
   }catch(e){stream.current?.getTracks().forEach(t=>t.stop());if(alive.current){setError(e instanceof DOMException&&e.name==='NotAllowedError'?'Microphone access was not allowed. Use the browser’s site settings to allow it, then try again.':errorMessage(e));setPhase(blob?'preview':'idle');}}
  }
  async function save(){if(!blob)return;setPhase('uploading');setError('');try{
-  const response=await fetch(`/api/actor/events/${line.id}/takes?revision=${line.revision}`,{method:'POST',headers:{'Content-Type':blob.type,'X-Upload-ID':uploadID.current},body:blob});
+  const response=await fetch(asActor(`/api/actor/events/${line.id}/takes?revision=${line.revision}`,actorID),{method:'POST',headers:{'Content-Type':blob.type,'X-Upload-ID':uploadID.current},body:blob});
   if(!response.headers.get('content-type')?.includes('application/json'))throw new Error('Your login may have expired. Download this take before signing in again.');
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Upload failed. Try Save take again.');
   if(!alive.current)return;setPhase('saved');try{await onSaved();}catch{setError('Your take was saved, but history could not refresh. Reload when ready.');}
@@ -69,12 +83,12 @@ function Recorder({line,enabled,onSaved,onDirty}:{line:Line;enabled:boolean;onSa
  </section>;
 }
 
-function ActorStudio({session,onAdmin}:{session:Session;onAdmin:()=>void}){
+function ActorStudio({session,onAdmin,actors,onActor}:{session:Session;onAdmin:()=>void;actors?:Named[];onActor?:(actor:Named)=>void}){
  const [data,setData]=useState<Workspace>(empty);const [takes,setTakes]=useState<Take[]>([]);const [sceneID,setSceneID]=useState('');const [lineID,setLineID]=useState('');const [error,setError]=useState('');const [loading,setLoading]=useState(true);const [history,setHistory]=useState(false);const dirty=useRef(false);
  const [recordingDirty,setRecordingDirty]=useState(false);
  const markDirty=useRef((value:boolean)=>{dirty.current=value;setRecordingDirty(value);}).current;
  async function loadTakes(){setTakes(await request<Take[]>('/api/actor/takes'));}
- useEffect(()=>{Promise.all([request<Workspace>('/api/actor/workspace'),request<Take[]>('/api/actor/takes')]).then(([w,t])=>{setData(w);setTakes(t);}).catch(e=>setError(errorMessage(e))).finally(()=>setLoading(false));},[]);
+ useEffect(()=>{Promise.all([request<Workspace>(asActor('/api/actor/workspace',session.user.admin?session.user.actor_id:undefined)),request<Take[]>('/api/actor/takes')]).then(([w,t])=>{setData(w);setTakes(t);}).catch(e=>setError(errorMessage(e))).finally(()=>setLoading(false));},[]);
  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
  function leave(fn:()=>void){if(!dirty.current||window.confirm('Leave this line? Your unsaved recording will be lost. Download or save it first if you want to keep it.')){dirty.current=false;fn();}}
  const assigned=new Set(data.assignments.filter(a=>a.actor_id===session.user.actor_id).map(a=>a.character_id));const mine=data.events.filter(e=>assigned.has(e.character_id));const scene=data.scenes.find(s=>s.id===sceneID);const lines=mine.filter(e=>e.scene_id===sceneID);const line=lines.find(e=>e.id===lineID)||lines[0];
@@ -82,13 +96,14 @@ function ActorStudio({session,onAdmin}:{session:Session;onAdmin:()=>void}){
  const ownTakes=takes.filter(t=>t.actor_id===session.user.actor_id);const context=data.events.filter(e=>e.scene_id===sceneID);const index=context.findIndex(e=>e.id===line?.id);const char=(id:string)=>data.characters.find(c=>c.id===id)?.name||'Character';
  return <div className="actor-studio"><header className="actor-top"><a className="actor-brand" href="#" onClick={e=>{e.preventDefault();leave(()=>{setSceneID('');setHistory(false);});}}>StoryForge <small>YOUR RECORDING STUDIO</small></a><div className="actor-account"><span>{session.user.name||session.user.email}</span>{session.user.admin&&<button className="secondary" onClick={()=>leave(onAdmin)}>Manage scripts</button>}<button className="secondary" onClick={()=>leave(()=>location.assign('/cdn-cgi/access/logout'))}>Sign out</button></div></header>
  <main className="actor-main"><div className="actor-intro"><div className="eyebrow">YOUR VOICE BRINGS THE STORY TO LIFE</div><h1>{scene?scene.name:`Your turn, ${session.user.name||'storyteller'}.`}</h1><p>{scene?'Take your time. You can try as many times as you like.':'Choose a scene, find your voice, and let’s make a story.'}</p></div>
- {error&&<p className="banner error" role="alert">{error}</p>}{loading?<p>Finding your parts…</p>:!session.user.actor_id?<div className="studio-empty"><h2>Your studio is almost ready.</h2><p>Ask Dad to link <strong>{session.user.email}</strong> to your actor under Cast & characters.</p></div>:<>
+ {onActor&&<section className="actor-switcher"><label>Change actor<select value={session.user.actor_id||''} onChange={e=>{const actor=actors?.find(a=>a.id===e.target.value);if(actor)leave(()=>onActor(actor));}}><option value="" disabled>Choose who is recording</option>{actors?.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label><p>{session.user.actor_id?`Recording as ${session.user.name}. Takes will be saved to this actor.`:'Choose an actor to see their parts and record for them.'} You are still signed in as the administrator.</p></section>}
+ {error&&<p className="banner error" role="alert">{error}</p>}{loading?<p>Finding your parts…</p>:!session.user.actor_id?<div className="studio-empty"><h2>Your studio is almost ready.</h2><p>{onActor?'Choose an actor above. Add actors under Cast & characters if the list is empty.':<>Ask Dad to link <strong>{session.user.email}</strong> to your actor under Cast & characters.</>}</p></div>:<>
  <div className="actor-navigation"><button className="secondary" onClick={()=>leave(()=>{setSceneID('');setHistory(false);})}>My scenes</button><button className="secondary" onClick={()=>leave(()=>{setSceneID('');setHistory(true);})}>My saved takes ({ownTakes.length})</button></div>
  {history?<section><h2>Your performances</h2>{!ownTakes.length&&<p>No saved takes yet. Your first performance can start in My scenes.</p>}{ownTakes.map(t=><div key={t.id} className="history-entry"><h3>{t.project_name} · {t.scene_name} · {t.character_name}</h3><p>{t.text}</p><TakeCard take={t} onPreferred={loadTakes}/></div>)}</section>:!scene?<div className="scene-cards">{!data.scenes.length&&<div className="studio-empty"><h2>A part is on its way.</h2><p>Once your character has dialogue, your scenes will appear here.</p></div>}{data.scenes.map(s=>{const part=mine.filter(l=>l.scene_id===s.id),done=part.filter(saved).length;return <button className="scene-card" key={s.id} onClick={()=>{setSceneID(s.id);setLineID(part.find(l=>!saved(l))?.id||part[0]?.id||'');}}><span>{data.projects.find(p=>p.id===s.project_id)?.name}</span><h2>{s.name}</h2><p>{Array.from(new Set(part.map(l=>char(l.character_id)))).join(' · ')}</p><progress value={done} max={part.length||1}/><strong>{done===part.length?'All lines have a take!':`${part.length-done} lines waiting for your voice`}</strong><small>{done} of {part.length} lines recorded</small></button>})}</div>:line?<>
  <ScenePreview sceneID={scene.id} version={JSON.stringify([context,takes])} disabled={recordingDirty}/>
  <div className="line-progress"><span>{lines.filter(saved).length} of {lines.length} lines recorded</span><progress value={lines.filter(saved).length} max={lines.length}/></div>
  <div className="actor-line-picker" aria-label="Your dialogue lines">{lines.map((l,i)=><button key={l.id} className={l.id===line.id?'current':'secondary'} aria-label={`Read your line ${i+1}`} onClick={()=>leave(()=>setLineID(l.id))}>{i+1}{saved(l)?' ✓':''}</button>)}</div>
- <section className="performance-card"><div className="performance-label"><span>YOU ARE {char(line.character_id)}</span><span>Your line {lines.indexOf(line)+1} of {lines.length}</span></div>{line.direction&&<div className="performance-direction"><strong>How to say it</strong><p>{line.direction}</p></div>}<p className="performance-text">{line.text}</p><details className="surrounding-lines"><summary>What happens around this line?</summary>{context.slice(Math.max(0,index-1),index+2).filter(e=>e.id!==line.id).map(e=><p key={e.id}><strong>{char(e.character_id)}:</strong> {e.text}</p>)}</details><Recorder key={line.id+'-'+line.revision} line={line} enabled={session.recording_enabled} onSaved={loadTakes} onDirty={markDirty}/></section>
+ <section className="performance-card"><div className="performance-label"><span>YOU ARE {char(line.character_id)}</span><span>Your line {lines.indexOf(line)+1} of {lines.length}</span></div>{line.direction&&<div className="performance-direction"><strong>How to say it</strong><p>{line.direction}</p></div>}<p className="performance-text">{line.text}</p><details className="surrounding-lines"><summary>What happens around this line?</summary>{context.slice(Math.max(0,index-1),index+2).filter(e=>e.id!==line.id).map(e=><p key={e.id}><strong>{char(e.character_id)}:</strong> {e.text}</p>)}</details><Recorder key={line.id+'-'+line.revision} line={line} actorID={session.user.admin?session.user.actor_id:undefined} enabled={session.recording_enabled} onSaved={loadTakes} onDirty={markDirty}/></section>
  <div className="next-line"><button className="secondary" disabled={lines.indexOf(line)===0} onClick={()=>leave(()=>setLineID(lines[lines.indexOf(line)-1].id))}>← Previous line</button><button disabled={lines.indexOf(line)===lines.length-1} onClick={()=>leave(()=>setLineID(lines[lines.indexOf(line)+1].id))}>Next line →</button></div>
  <section className="take-history"><h2>Your takes for this line</h2><p>Every saved take stays here. A star marks your preferred performance.</p>{ownTakes.filter(t=>t.event_id===line.id).map(t=><TakeCard key={t.id} take={t} onPreferred={loadTakes}/>)}{!ownTakes.some(t=>t.event_id===line.id)&&<p className="studio-empty">Your first saved take will appear here.</p>}</section>
  </>:<p>No assigned lines remain in this scene.</p>}</>}

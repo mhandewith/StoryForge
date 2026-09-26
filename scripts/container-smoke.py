@@ -208,6 +208,20 @@ def recording_checks(project,char,scene,created,updated):
     api(preview_path,{},'POST',expected=404,email='performer@example.test')
     api('/api/assignments/'+char['id'],{'actor_id':actor['id']},'PUT')
     print('Actor permissions, source checksums, multiple takes, upload retries, playback ranges, preference and stale revisions passed.')
+    admin_before=api('/api/session')
+    current=next(e for e in api('/api/workspace')['events'] if e['id']==created['id'])
+    shared_path='/api/actor/events/'+created['id']+'/takes?revision='+str(current['revision'])+'&as_actor='+actor['id']
+    shared_headers={'Content-Type':'audio/wav','X-Upload-ID':'e'*32}
+    shared=json.loads(audio_request(shared_path,body,'POST',201,email='admin@example.test',extra=shared_headers))
+    assert shared['actor_id']==actor['id'], 'Shared-device take saved to wrong actor'
+    assert any(t['id']==shared['id'] for t in api('/api/actor/takes',email='performer@example.test'))
+    assert api('/api/session')==admin_before, 'Actor selection changed administrator login'
+    api('/api/actor/workspace?as_actor='+actor['id'],expected=403,email='other@example.test')
+    audio_request(shared_path,body,'POST',403,email='other@example.test',extra=shared_headers)
+    api('/api/actor/workspace?as_actor=bad',expected=400)
+    api('/api/actor/workspace?as_actor=00000000-0000-4000-8000-000000000001',expected=404)
+    audio_request(shared_path.replace(actor['id'],other['id']),body,'POST',403,email='admin@example.test',extra=shared_headers)
+    print('Admin actor selection preserves login, attributes takes correctly and rejects non-admin switching.')
 
 
 def tools_checks():
