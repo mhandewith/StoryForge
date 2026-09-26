@@ -82,6 +82,9 @@ export default function App() {
   const actorFor=(characterID:string)=>data.actors.find(a=>a.id===data.assignments.find(x=>x.character_id===characterID)?.actor_id)?.name;
   async function reorder(kind:'scenes'|'lines',ids:string[]){
     if(editing&&!window.confirm('Discard the current unsaved line edits and reorder?'))return;
+    // The initial scene can be a fallback rather than an explicit selection.
+    // Pin its identity before refreshing a list whose first item may change.
+    if(kind==='scenes'&&scene)setSceneID(scene.id);
     const path=kind==='scenes'?`/api/projects/${projectID}/scene-order`:`/api/scenes/${scene?.id}/line-order`;
     if(await save(path,{ids,expected:(kind==='scenes'?scenes:lines).map(x=>x.id)},'PUT'))setEditing(undefined);
   }
