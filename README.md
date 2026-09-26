@@ -345,3 +345,5 @@ Official references:
 [GitHub registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 Whole-scene audio: [server-generated scene previews](docs/scene-previews.md).
+
+ElevenLabs setup and conversion workflow: [Unraid voice conversion guide](docs/elevenlabs-unraid.md).

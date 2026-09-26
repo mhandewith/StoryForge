@@ -94,8 +94,15 @@ func run() error {
 	if port == "" {
 		port = "8080"
 	}
+	eleven, err := api.NewElevenClient()
+	if err != nil {
+		return err
+	}
+	service := &api.API{DB: db, Auth: auth, RecordingsDir: recordings, Eleven: eleven}
+	stopVoiceWorker := service.StartVoiceWorker(ctx)
+	defer stopVoiceWorker()
 	server := &http.Server{
-		Addr: ":" + port, Handler: handler(db, webDir, &api.API{DB: db, Auth: auth, RecordingsDir: recordings}),
+		Addr: ":" + port, Handler: handler(db, webDir, service),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       120 * time.Second,
 		WriteTimeout:      120 * time.Second,

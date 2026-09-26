@@ -22,6 +22,7 @@ type API struct {
 	DB            *pgxpool.Pool
 	Auth          *identity.Auth
 	RecordingsDir string
+	Eleven        *ElevenClient
 }
 
 func JSON(w http.ResponseWriter, status int, value any) {
@@ -71,6 +72,7 @@ func validText(s string, limit int) bool {
 func (a *API) Register(mux *http.ServeMux) {
 	a.registerRecording(mux)
 	a.registerTools(mux)
+	a.registerVoicing(mux)
 	mux.HandleFunc("GET /api/workspace", a.workspace)
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("POST /api/actors", a.createActor)
@@ -208,17 +210,34 @@ func (a *API) createCharacter(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) targetVoice(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TargetVoice string `json:"target_voice"`
+		VoiceID string `json:"voice_id"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	in.TargetVoice = strings.TrimSpace(in.TargetVoice)
-	if !validID(r.PathValue("characterID")) || utf8.RuneCountInString(in.TargetVoice) > 120 || strings.ContainsRune(in.TargetVoice, 0) {
-		problem(w, 400, "Enter a target voice of up to 120 characters.")
+	if !validID(r.PathValue("characterID")) {
+		problem(w, 400, "Choose a character.")
 		return
 	}
-	a.row(w, r, 200, `UPDATE characters SET target_voice=$2 WHERE id=$1 AND id IN (SELECT id FROM active_characters) RETURNING row_to_json(characters)`, r.PathValue("characterID"), in.TargetVoice)
+	name := ""
+	if in.VoiceID != "" {
+		voices, err := a.Eleven.Voices(r.Context(), false)
+		if err != nil {
+			problem(w, 503, err.Error())
+			return
+		}
+		for _, v := range voices {
+			if v.ID == in.VoiceID {
+				name = v.Name
+				break
+			}
+		}
+		if name == "" {
+			problem(w, 400, "Choose an available ElevenLabs voice. Refresh voices if needed.")
+			return
+		}
+	}
+	a.row(w, r, 200, `UPDATE characters SET target_voice=$2,eleven_voice_id=$3 WHERE id=$1 AND id IN (SELECT id FROM active_characters) RETURNING row_to_json(characters)`, r.PathValue("characterID"), name, in.VoiceID)
 }
 
 func (a *API) assign(w http.ResponseWriter, r *http.Request) {

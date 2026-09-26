@@ -164,8 +164,11 @@ func (a *API) uploadTake(w http.ResponseWriter, r *http.Request) {
 		if e = tx.QueryRow(ctx, `INSERT INTO audio_assets(storage_key,sha256,mime_type,size_bytes,duration_ms,sample_rate,channels) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`, key, digest, contentType, size, info.Duration, info.Rate, info.Channels).Scan(&asset); e != nil {
 			return e
 		}
+		if _, e = tx.Exec(ctx, `UPDATE takes SET preferred=false WHERE event_id=$1 AND actor_id=$2 AND preferred`, event, u.ActorID); e != nil {
+			return e
+		}
 		if e = tx.QueryRow(ctx, `INSERT INTO takes(event_id,revision,actor_id,asset_id,take_number,preferred,request_id)
-   SELECT $1,$2,$3,$4,COALESCE(max(take_number),0)+1,NOT COALESCE(bool_or(preferred),false),$5 FROM takes WHERE event_id=$1 AND actor_id=$3 RETURNING row_to_json(takes)`, event, revision, u.ActorID, asset, requestID).Scan(&result); e != nil {
+   SELECT $1,$2,$3,$4,COALESCE(max(take_number),0)+1,true,$5 FROM takes WHERE event_id=$1 AND actor_id=$3 RETURNING row_to_json(takes)`, event, revision, u.ActorID, asset, requestID).Scan(&result); e != nil {
 			return e
 		}
 		// Install the durable source before committing metadata. Never delete an installed
@@ -186,6 +189,10 @@ func (a *API) uploadTake(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 201, result)
 }
 func (a *API) preferTake(w http.ResponseWriter, r *http.Request) {
+	if !identity.Current(r.Context()).Admin {
+		problem(w, 403, "Only administrators can choose a preferred take.")
+		return
+	}
 	var in struct {
 		Preferred bool `json:"preferred"`
 	}

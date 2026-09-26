@@ -5,6 +5,7 @@ import wave
 import hashlib
 import os
 import secrets
+import uuid
 import subprocess
 import sys
 import time
@@ -18,6 +19,7 @@ DB = "storyforge-ci-db"
 NETWORK = "storyforge-ci-net"
 VOLUME = "storyforge-ci-data"
 AUDIO_VOLUME = "storyforge-ci-recordings"
+ELEVEN = 'storyforge-ci-eleven'
 
 
 def docker(*args, check=True):
@@ -52,6 +54,7 @@ def start_app():
            '-v',AUDIO_VOLUME+':/data/recordings','-e','STORYFORGE_RECORDINGS_DIR=/data/recordings',
            '-e','STORYFORGE_AUTH_MODE=development','-e','STORYFORGE_DEV_AUTH_TOKEN',
            '-e','STORYFORGE_PUBLIC_ORIGIN=http://127.0.0.1:18088','-e','STORYFORGE_ADMIN_EMAILS=admin@example.test',
+           '-e','ELEVENLABS_API_KEY=test-key','-e','ELEVENLABS_TEST_URL=http://'+ELEVEN+':8080',
            "-e", "PGHOST=" + DB, "-e", "PGUSER=storyforge", "-e", "PGDATABASE=storyforge",
            "-e", "PGSSLMODE=disable", "-e", "PGPASSWORD", os.environ["SMOKE_IMAGE"])
     ready()
@@ -69,6 +72,7 @@ def setup():
             env.write("PGPASSWORD=" + os.environ["PGPASSWORD"] + "\n")
             env.write('STORYFORGE_DEV_AUTH_TOKEN='+os.environ['STORYFORGE_DEV_AUTH_TOKEN']+'\n')
     docker("network", "create", NETWORK)
+    docker('run','-d','--name',ELEVEN,'--network',NETWORK,'-p','127.0.0.1:18089:8080','-v',str(Path(__file__).resolve().parent)+':/tests:ro','python:3.13-alpine','python','/tests/fake-eleven.py')
     docker("volume", "create", VOLUME)
     docker('volume','create',AUDIO_VOLUME)
     docker("run", "-d", "--name", DB, "--network", NETWORK,
@@ -105,10 +109,10 @@ INSERT INTO script_events(project_id,scene_id,character_id,text,position) VALUES
     api("/api/assignments/" + char["id"], {"actor_id": actor["id"]}, "PUT")
     voice_path = '/api/characters/' + char['id'] + '/target-voice'
     assert char['target_voice'] == ''
-    assert api(voice_path, {'target_voice':'Wolf'}, 'PUT')['target_voice'] == 'Wolf'
-    assert api(voice_path, {'target_voice':''}, 'PUT')['target_voice'] == ''
-    api(voice_path, {'target_voice':'x'*121}, 'PUT', expected=400)
-    api(voice_path, {'target_voice':'Wolf'}, 'PUT')
+    assert api(voice_path, {'voice_id':'voice-wolf'}, 'PUT')['target_voice'] == 'Wolf'
+    assert api(voice_path, {'voice_id':''}, 'PUT')['target_voice'] == ''
+    api(voice_path, {'voice_id':'nonexistent'}, 'PUT', expected=400)
+    api(voice_path, {'voice_id':'voice-wolf'}, 'PUT')
     voice_snapshot = api('/api/workspace')
     assert next(c for c in voice_snapshot['characters'] if c['id']==char['id'])['target_voice']=='Wolf'
     assert next(a for a in voice_snapshot['assignments'] if a['character_id']==char['id'])['actor_id']==actor['id']
@@ -135,6 +139,7 @@ INSERT INTO script_events(project_id,scene_id,character_id,text,position) VALUES
     print("Database API checks passed: relations, assignments, validation, conflicts, overlap, revisions.")
     tools_checks()
     recording_checks(project,char,scene,created,updated)
+    voicing_checks()
 
 
 def audio_request(path,body=None,method=None,expected=200,email='performer@example.test',extra=None):
@@ -190,14 +195,14 @@ def recording_checks(project,char,scene,created,updated):
     partial=audio_request('/api/actor/takes/'+first['id']+'/audio',expected=206,extra={'Range':'bytes=0-9'});assert partial==body[:10]
     takes=api('/api/actor/takes',email='performer@example.test')
     assert takes[0]['sha256']==hashlib.sha256(body).hexdigest() and takes[0]['duration_ms']==1000
-    api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',email='performer@example.test')
+    api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',expected=403,email='performer@example.test')
     takes=api('/api/actor/takes',email='performer@example.test');assert [t['id'] for t in takes if t['preferred']]==[second['id']]
     mixed=api(preview_path,{},'POST',email='performer@example.test')
     assert mixed['recorded_lines']==1 and mixed['url']!=synthetic['url']
     assert audio_request(mixed['url'])!=original_preview
-    api('/api/actor/takes/'+first['id']+'/preferred',{'preferred':True},'PUT',email='performer@example.test')
+    api('/api/actor/takes/'+first['id']+'/preferred',{'preferred':True},'PUT')
     assert api(preview_path,{},'POST')['url']!=mixed['url'], 'Preferred take did not invalidate preview'
-    api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',expected=404,email='other@example.test')
+    api('/api/actor/takes/'+second['id']+'/preferred',{'preferred':True},'PUT',expected=403,email='other@example.test')
     api('/api/events/'+created['id'],dict(project_id=project['id'],scene_id=scene['id'],character_id=char['id'],text='Changed after recording.',direction='',position=1,start_ms=0,revision=updated['revision']),'PUT')
     assert all(t['stale'] for t in api('/api/actor/takes',email='performer@example.test'))
     assert audio_request('/api/actor/takes/'+first['id']+'/audio')==body
@@ -296,6 +301,91 @@ Goodbye.'''
     print('Import preview, rollback, retries, archive preservation, removal rules and atomic reorder passed.')
 
 
+def fake_eleven(body=None):
+    endpoint='/test/control' if body is not None else '/test/state'
+    req=urllib.request.Request('http://127.0.0.1:18089'+endpoint,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})
+    with urllib.request.urlopen(req,timeout=5) as response: return json.load(response)
+
+
+def voicing_checks():
+    voices=api('/api/voices');assert voices['configured']
+    listed=fake_eleven()['lists'];api('/api/voices');assert fake_eleven()['lists']==listed
+    fake_eleven({'extra_voice':True})
+    assert any(v['voice_id']=='voice-new' for v in api('/api/voices/refresh',{},'POST')['voices'])
+    api('/api/voices/refresh',{},'POST',expected=403,email='performer@example.test')
+    p=api('/api/import',{'text':'[script: Conversion test]\n[cast: Wolf | Conversion reader]\n[cast: Owl | Conversion reader]\n[scene: Together]\n[Wolf]\nHello owl.\n[Owl]\nHello wolf.','request_id':'f'*32},expected=201)
+    w=api('/api/workspace');scene=next(s for s in w['scenes'] if s['project_id']==p['id'])
+    actor=next(a for a in w['actors'] if a['name']=='Conversion reader')
+    api('/api/actors/'+actor['id']+'/login',{'email':'conversion@example.test'},'PUT')
+    lines=[e for e in w['events'] if e['scene_id']==scene['id']]
+    status_path='/api/actor/scenes/'+scene['id']+'/voicing';queue_path='/api/scenes/'+scene['id']+'/voice'
+    for c in [c for c in w['characters'] if c['project_id']==p['id']]:
+        api('/api/characters/'+c['id']+'/target-voice',{'voice_id':'voice-'+c['name'].lower()},'PUT')
+    assert not api(status_path)['ready']
+    api(queue_path,{'request_id':str(uuid.uuid4()),'snapshot_hash':api(status_path)['snapshot_hash']},'POST',expected=400)
+    wav=io.BytesIO()
+    with wave.open(wav,'wb') as output:
+        output.setnchannels(1);output.setsampwidth(2);output.setframerate(16000);output.writeframes(b'\0\0'*16000)
+    raw=wav.getvalue()
+    def upload(line):
+        return json.loads(audio_request('/api/actor/events/'+line['id']+'/takes?revision=1&as_actor='+actor['id'],raw,'POST',201,email='admin@example.test',extra={'Content-Type':'audio/wav','X-Upload-ID':secrets.token_hex(16)}))
+    takes=[upload(l) for l in lines]
+    def enqueue(event='',expected=202,body=None):
+        body=body or {'request_id':str(uuid.uuid4()),'snapshot_hash':api(status_path)['snapshot_hash'],'event_id':event}
+        return api(queue_path,body,'POST',expected=expected)
+    def wait_run(state='complete'):
+        for _ in range(150):
+            s=api(status_path)
+            if s['run'] and s['run']['state']==state: return s
+            if s['run'] and s['run']['state']=='failed' and state!='failed': raise AssertionError(s)
+            time.sleep(.2)
+        raise AssertionError('Conversion queue did not reach '+state)
+    assert api(status_path)['ready']
+    api(queue_path,{'request_id':str(uuid.uuid4()),'snapshot_hash':api(status_path)['snapshot_hash']},'POST',expected=403,email='conversion@example.test')
+    before=fake_eleven()['calls'];fake_eleven({'delay':.4})
+    request_body={'request_id':str(uuid.uuid4()),'snapshot_hash':api(status_path)['snapshot_hash']}
+    first=enqueue(body=request_body);assert enqueue(body=request_body)==first
+    done=wait_run();assert fake_eleven()['calls']==before+2
+    url='/api/actor/scenes/'+scene['id']+'/converted/'+done['finished']['id']
+    compiled=audio_request(url,email='conversion@example.test');assert len(compiled)>1000
+    assert audio_request(url,email='conversion@example.test',expected=206,extra={'Range':'bytes=0-9'})==compiled[:10]
+    audio_request(url,email='other@example.test',expected=404)
+    for c in done['conversions']:
+        assert len(audio_request('/api/actor/scenes/'+scene['id']+'/converted/'+c['id'],email='conversion@example.test'))>1000
+    enqueue();time.sleep(.3);assert fake_eleven()['calls']==before+2,'Unchanged scene spent credits again'
+    enqueue(lines[0]['id']);done=wait_run();assert fake_eleven()['calls']==before+3,'Single-line regeneration resent other lines'
+    newer=upload(lines[0]);s=api(status_path);assert s['finished']['snapshot_hash']!=s['snapshot_hash']
+    assert next(l for l in s['lines'] if l['event_id']==lines[0]['id'])['take_id']==newer['id']
+    api('/api/actor/takes/'+takes[0]['id']+'/preferred',{'preferred':True},'PUT')
+    assert next(l for l in api(status_path)['lines'] if l['event_id']==lines[0]['id'])['take_id']==takes[0]['id']
+    assert audio_request('/api/actor/takes/'+takes[0]['id']+'/audio',email='conversion@example.test')==raw
+    # A failed request stays failed; the prior completed scene remains playable.
+    fake_eleven({'fail_next':True,'delay':0});enqueue(lines[0]['id']);failed=wait_run('failed')
+    calls=fake_eleven()['calls'];time.sleep(2);assert fake_eleven()['calls']==calls
+    assert failed['finished'] is not None
+    # Restart during a paid request: recover conservatively, never automatically resend.
+    fake_eleven({'delay':12});enqueue(lines[0]['id'])
+    for _ in range(100):
+        if fake_eleven()['calls']>calls:break
+        time.sleep(.1)
+    else:raise AssertionError('Worker did not dispatch delayed request')
+    calls=fake_eleven()['calls'];docker('restart',APP);ready();wait_run('failed');time.sleep(2)
+    assert fake_eleven()['calls']==calls,'Interrupted paid request was resent'
+    fake_eleven({'delay':0});enqueue(lines[0]['id']);done=wait_run();assert fake_eleven()['calls']==calls+1
+    # Completed output survives a container restart, including seeking.
+    docker('stop',APP)
+    docker('start',APP);ready()
+    final=api(status_path);assert final['finished']==done['finished']
+    assert len(audio_request('/api/actor/scenes/'+scene['id']+'/converted/'+final['finished']['id'],email='conversion@example.test'))>1000
+    docker('stop',APP)
+    queued=str(uuid.uuid4())
+    docker('exec',DB,'psql','-U','storyforge','-v','ON_ERROR_STOP=1','-c',
+           "INSERT INTO voice_runs(id,scene_id,snapshot_hash,request_id,requested_by) SELECT '"+queued+"',scene_id,snapshot_hash,gen_random_uuid(),'ci@example.test' FROM voice_runs WHERE id='"+done['finished']['id']+"'; INSERT INTO voice_jobs(run_id,event_id,take_id,voice_id,position,source_key,state) SELECT '"+queued+"',event_id,take_id,voice_id,position,source_key,'queued' FROM voice_jobs WHERE run_id='"+done['finished']['id']+"';")
+    calls=fake_eleven()['calls'];docker('start',APP);ready();resumed=wait_run()
+    assert resumed['finished']['id']==queued and fake_eleven()['calls']==calls+2, 'Queued work did not resume after restart'
+    print('Voice refresh/cache, readiness, paid-request deduplication, line reuse, regeneration, actor playback, stale takes and conservative restart recovery passed.')
+
+
 def restart():
     before = api("/api/workspace")
     takes_before=api('/api/actor/takes')
@@ -318,7 +408,7 @@ def restart():
 
 
 def cleanup():
-    for name in (APP, DB):
+    for name in (APP, DB, ELEVEN):
         print(docker("logs", name, check=False))
         docker("rm", "-f", name, check=False)
     docker("volume", "rm", VOLUME, check=False)

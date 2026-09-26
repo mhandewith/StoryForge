@@ -17,3 +17,5 @@
 .scene-preview{padding:20px;border-bottom:1px solid #e0e3d9;background:#eef1e6;margin-bottom:20px}.scene-preview h3{margin-bottom:8px}.scene-preview p{font-size:12px;line-height:1.6;margin:10px 0}.scene-preview audio{display:block;width:100%;margin-top:14px}
 
 .actor-switcher{padding:18px 20px;margin-bottom:24px;background:#e7eedf;border:1px solid #c7d7b8;border-radius:8px}.actor-switcher label{max-width:360px}.actor-switcher p{margin-top:10px;font-size:12px;line-height:1.6;color:#52635a}
+
+.voicing{padding:20px;margin:16px 0;background:#f0f1e8;border:1px solid #d5ddc9;border-radius:8px}.voicing h3{margin-bottom:10px}.voicing p{font-size:13px;margin:10px 0;line-height:1.6}.voicing audio{display:block;width:100%;margin:12px 0}.voicing details{margin-top:16px}.voicing summary{cursor:pointer}.converted-line{border-top:1px solid #d5ddc9;padding:16px 0}.converted-line small{display:block}.converted-scene{margin-top:16px}.voice-progress{color:#486242}.target-voice{grid-template-columns:minmax(0,1fr) auto}.target-voice>button[type=button]{grid-column:1/-1;justify-self:start}

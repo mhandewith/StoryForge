@@ -38,7 +38,7 @@ func inspectAudio(ctx context.Context, path string) (audioInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	// Restrict demuxers/protocols: uploaded files must not fetch external resources.
-	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "matroska,webm,mov,wav,ogg", "-show_entries", "stream=codec_type,codec_name,sample_rate,channels:packet=pts_time,duration_time", "-of", "json", path)
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "matroska,webm,mov,wav,ogg,mp3", "-show_entries", "stream=codec_type,codec_name,sample_rate,channels:packet=pts_time,duration_time", "-of", "json", path)
 	out, err := cmd.Output()
 	if err != nil {
 		return audioInfo{}, errors.New("That file could not be read as audio. Keep the recording and try again.")

@@ -43,8 +43,8 @@ test('an actor records, previews, saves multiple takes and replays history',asyn
  await page.getByRole('button',{name:'■ Stop recording'}).click();
  await page.getByRole('button',{name:'Save take',exact:true}).click();
  await expect(page.locator('.take-card')).toHaveCount(2);
- await page.locator('.take-card').first().getByRole('button',{name:'☆ Make preferred'}).click();
- await expect(page.locator('.take-card').first().getByRole('button',{name:'★ Preferred take'})).toBeVisible();
+ await expect(page.locator('.take-card').first()).toContainText('★ Preferred take');
+ await expect(page.getByRole('button',{name:/preferred/i})).toHaveCount(0);
  await page.getByRole('button',{name:'Generate scene preview',exact:true}).click();
  await expect(page.getByLabel('Whole scene preview')).toContainText('1 recorded · 1 computer-voiced lines',{timeout:90000});
  const wholeScene=page.getByLabel('Play whole scene');

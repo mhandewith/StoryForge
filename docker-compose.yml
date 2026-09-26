@@ -18,6 +18,7 @@ services:
       CF_ACCESS_AUD: "${CF_ACCESS_AUD:-}"
       STORYFORGE_ADMIN_EMAILS: "${STORYFORGE_ADMIN_EMAILS:-}"
       STORYFORGE_RECORDINGS_DIR: /data/recordings
+      ELEVENLABS_API_KEY: "${ELEVENLABS_API_KEY:-}"
     volumes:
       - recordings:/data/recordings
     depends_on:
