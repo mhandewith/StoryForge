@@ -34,6 +34,7 @@ type previewLine struct {
 	Revision  int    `json:"revision"`
 	Source    string `json:"source"`
 	Duration  int    `json:"duration_ms"`
+	Converted bool   `json:"converted"`
 }
 
 // One SQL statement captures ordering, assignment and chosen takes together.
@@ -42,11 +43,12 @@ func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, er
 	u := identity.Current(ctx)
 	var raw []byte
 	err := a.DB.QueryRow(ctx, `SELECT COALESCE((SELECT jsonb_agg(x ORDER BY x.position,x.id) FROM (
- SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms
- FROM active_events e LEFT JOIN active_assignments ass ON ass.character_id=e.character_id
- LEFT JOIN LATERAL (SELECT asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
+ SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(converted.audio_key,t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms,converted.audio_key IS NOT NULL AS converted
+ FROM active_events e JOIN active_characters c ON c.id=e.character_id LEFT JOIN active_assignments ass ON ass.character_id=e.character_id
+ LEFT JOIN LATERAL (SELECT tk.id,asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
  WHERE tk.event_id=e.id AND tk.revision=e.revision AND ass.character_id IS NOT NULL AND (tk.actor_id=ass.actor_id OR ass.actor_id IS NULL)
- ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
+	 ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
+ LEFT JOIN LATERAL (SELECT j.audio_key FROM voice_jobs j WHERE j.event_id=e.id AND j.take_id=t.id AND j.voice_id=c.eleven_voice_id AND j.state='complete' AND j.audio_key<>'' ORDER BY j.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) converted ON true
  WHERE e.scene_id=s.id) x),'[]'::jsonb)
  FROM active_scenes s WHERE s.id=$1 AND ($2::boolean OR EXISTS(
  SELECT 1 FROM active_events e JOIN active_assignments ass ON ass.character_id=e.character_id
@@ -168,13 +170,16 @@ func (a *API) renderScene(w http.ResponseWriter, r *http.Request) {
 		a.failure(w, err)
 		return
 	}
-	recorded := 0
+	recorded, converted := 0, 0
 	for _, l := range lines {
+		if l.Converted {
+			converted++
+		}
 		if l.Source != "" {
 			recorded++
 		}
 	}
-	JSON(w, 200, map[string]any{"url": "/api/actor/scenes/" + id + "/preview/" + key, "recorded_lines": recorded, "synthetic_lines": len(lines) - recorded, "part": in.Part, "parts": len(parts), "start_line": start, "end_line": start + len(lines) - 1, "snapshot": snapshot})
+	JSON(w, 200, map[string]any{"url": "/api/actor/scenes/" + id + "/preview/" + key, "recorded_lines": recorded, "converted_lines": converted, "synthetic_lines": len(lines) - recorded, "part": in.Part, "parts": len(parts), "start_line": start, "end_line": start + len(lines) - 1, "snapshot": snapshot})
 }
 
 func (a *API) sceneAudio(w http.ResponseWriter, r *http.Request) {

@@ -132,6 +132,14 @@ func (a *API) workVoiceRun(ctx context.Context, c *pgxpool.Conn, run, scene stri
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
+	var single bool
+	if err = c.QueryRow(ctx, `SELECT single_line FROM voice_runs WHERE id=$1`, run).Scan(&single); err != nil {
+		return err
+	}
+	if single {
+		_, err = c.Exec(ctx, `UPDATE voice_runs SET state='complete',error='' WHERE id=$1`, run)
+		return err
+	}
 	rows, err := c.Query(ctx, `SELECT event_id::text,audio_key FROM voice_jobs WHERE run_id=$1 AND state='complete' ORDER BY position,id`, run)
 	if err != nil {
 		return err

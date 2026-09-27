@@ -16,7 +16,7 @@ export function TargetVoice({id,name,value,label,busy,save}:{id:string;name:stri
 const message=(e:unknown)=>e instanceof Error?e.message:'Unable to load voice conversion.';
 type Line={event_id:string;take_id:string;voice_id:string;character:string;text:string;position:number};
 type Conversion={id:string;event_id:string;take_id:string;voice_id:string};
-type State={configured:boolean;ready:boolean;missing_takes:number;missing_voices:number;snapshot_hash:string;lines:Line[];run:null|{id:string;state:string;error:string;done:number;total:number};finished:null|{id:string;snapshot_hash:string};conversions:Conversion[]};
+type State={configured:boolean;ready:boolean;missing_takes:number;missing_voices:number;snapshot_hash:string;lines:Line[];run:null|{id:string;state:string;single_line:boolean;error:string;done:number;total:number};finished:null|{id:string;snapshot_hash:string};conversions:Conversion[]};
 function ConvertedPlayer({src,label}:{src:string;label:string}){return <audio controls preload="none" src={src} aria-label={label} onPlay={e=>{document.querySelectorAll('audio').forEach(a=>{if(a!==e.currentTarget)a.pause();});}}/>;}
 export function Voicing({sceneID,admin=false,eventID,version,disabled=false}:{sceneID:string;admin?:boolean;eventID?:string;version:string;disabled?:boolean}){
  const [state,setState]=useState<State>();const [error,setError]=useState('');const [busy,setBusy]=useState(false);const retry=useRef<{key:string;id:string}|undefined>(undefined);
@@ -29,7 +29,7 @@ export function Voicing({sceneID,admin=false,eventID,version,disabled=false}:{sc
  },[sceneID,version]);
  async function start(event=''){
   if(!state)return;
-  if(!window.confirm(event?'Regenerate this line using ElevenLabs credits, then rebuild the scene?':'Send the selected recordings to ElevenLabs? Voice changing and isolation both use your ElevenLabs credits. Completed matching lines will be reused.'))return;
+  if(!window.confirm(event?'Convert this line using ElevenLabs credits? Generate a scene preview afterward to hear it in context.':'Send the selected recordings to ElevenLabs? Voice changing and isolation both use your ElevenLabs credits. Completed matching lines will be reused.'))return;
   const generation=current.current;const key=state.snapshot_hash+event;
   if(retry.current?.key!==key)retry.current={key,id:crypto.randomUUID()};
   setBusy(true);setError('');
@@ -40,15 +40,15 @@ export function Voicing({sceneID,admin=false,eventID,version,disabled=false}:{sc
  const audio=(id:string)=>`/api/actor/scenes/${sceneID}/converted/${id}`;
  const renderLine=(line:Line)=>{
   const c=state?.conversions.find(c=>c.event_id===line.event_id);const stale=c&&(c.take_id!==line.take_id||c.voice_id!==line.voice_id);
-  return <div className="converted-line" key={line.event_id}><strong>{line.position}. {line.character}</strong><p>{line.text}</p>{c?<><small>{stale?'Earlier take or voice — needs updating':'Latest converted line'}</small>{!disabled&&<ConvertedPlayer src={audio(c.id)} label={`Converted line ${line.position}`}/>}</>:<p>No converted recording yet.</p>}{admin&&c&&<button className="secondary" disabled={busy||!!active||disabled||!state?.ready||!state.configured} onClick={()=>void start(line.event_id)}>Regenerate line {line.position}</button>}</div>;
+  return <div className="converted-line" key={line.event_id}><strong>{line.position}. {line.character}</strong><p>{line.text}</p>{c?<><small>{stale?'Earlier take or voice — needs updating':'Latest converted line'}</small>{!disabled&&<ConvertedPlayer src={audio(c.id)} label={`Converted line ${line.position}`}/>}</>:<p>No converted recording yet.</p>}{admin&&<button className="secondary" disabled={busy||!!active||disabled||!line.take_id||!line.voice_id||!state?.configured} onClick={()=>void start(line.event_id)}>{c?'Regenerate':'Convert'} line {line.position}</button>}</div>;
  };
  return <section className="voicing" aria-label="ElevenLabs scene"><h3>Character voices</h3>
  {error&&<p role="alert" className="banner error">{error}</p>}
  {!state?<p>Loading conversion status…</p>:<>
  {admin&&<><p>{!state.configured?'Connect ElevenLabs in Unraid to voice this scene.':state.ready?'Ready to convert the selected takes.':`${state.missing_takes} lines need current takes · ${state.missing_voices} lines need target voices`}</p><button disabled={busy||!!active||!state.ready||!state.configured||disabled} onClick={()=>void start()}>{busy?'Queuing…':active?'Voicing scene…':'Voice scene'}</button></>}
- {state.run&&<p className="voice-progress">{state.run.state==='complete'?'Scene conversion complete':state.run.state==='failed'?'Conversion needs attention':`${state.run.state==='queued'?'Queued':'Converting'}: ${state.run.done} of ${state.run.total} lines ready`}</p>}
+ {state.run&&<p className="voice-progress">{state.run.state==='complete'?(state.run.single_line?'Line conversion complete — generate a scene preview to hear it in context.':'Scene conversion complete'):state.run.state==='failed'?'Conversion needs attention':`${state.run.state==='queued'?'Queued':'Converting'}: ${state.run.done} of ${state.run.total} lines ready`}</p>}
  {state.run?.error&&<p className="banner error">{state.run.error}</p>}
- {state.finished&&<div className="converted-scene"><strong>Converted scene</strong>{state.finished.snapshot_hash!==state.snapshot_hash&&<p>Earlier scene version — new takes, voices, or script changes need conversion.</p>}{!disabled&&<ConvertedPlayer src={audio(state.finished.id)} label="Play converted scene"/>}</div>}
+ {state.finished&&<div className="converted-scene"><strong>Converted scene</strong>{(state.finished.snapshot_hash!==state.snapshot_hash||state.run?.single_line)&&<p>Earlier scene version — new takes, voices, or script changes need conversion.</p>}{!disabled&&<ConvertedPlayer src={audio(state.finished.id)} label="Play converted scene"/>}</div>}
  {eventID?state.lines.filter(l=>l.event_id===eventID).map(renderLine):<details><summary>Converted lines</summary>{state.lines.map(renderLine)}</details>}
  </>}</section>;
 }

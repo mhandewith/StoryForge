@@ -23,4 +23,27 @@ test('long previews build ordered listening parts without paid conversions',asyn
  expect((await request.post(endpoint,{data:{part:1,snapshot:'outdated'}})).status()).toBe(409);
  const status=await (await request.get(`/api/actor/scenes/${scene.id}/voicing`)).json();
  expect(status.run).toBeNull();
+ // One recorded line can convert even in a >120-line unfinished scene.
+ const line=workspace.events.find((e:{scene_id:string})=>e.scene_id===scene.id);
+ const actor=workspace.actors.find((a:{name:string})=>a.name==='Long preview actor');
+ const wav=Buffer.alloc(32044);wav.write('RIFF',0);wav.writeUInt32LE(32036,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(16000,24);wav.writeUInt32LE(32000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(32000,40);
+ const upload=()=>request.post(`/api/actor/events/${line.id}/takes?revision=1&as_actor=${actor.id}`,{headers:{'Content-Type':'audio/wav','X-Upload-ID':randomUUID().replaceAll('-','')},data:wav});
+ expect((await upload()).ok()).toBeTruthy();
+ expect((await request.put(`/api/characters/${line.character_id}/target-voice`,{data:{voice_id:'voice-wolf'}})).ok()).toBeTruthy();
+ await page.reload();await page.getByLabel('Current project').selectOption(project.id);
+ await page.getByText('Converted lines',{exact:true}).click();
+ await expect(page.getByRole('button',{name:'Voice scene',exact:true})).toBeDisabled();
+ const before=(await (await request.get('http://127.0.0.1:18089/test/state')).json()).calls;
+ page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Convert line 1',exact:true}).click();
+ await expect(page.getByLabel('ElevenLabs scene')).toContainText('Line conversion complete',{timeout:60000});
+ expect((await (await request.get('http://127.0.0.1:18089/test/state')).json()).calls).toBe(before+1);
+ const converted=await (await request.post(endpoint,{data:{part:0}})).json();expect(converted.converted_lines).toBe(1);
+ expect((await (await request.get(`/api/actor/scenes/${scene.id}/voicing`)).json()).finished).toBeNull();
+ await request.put(`/api/characters/${line.character_id}/target-voice`,{data:{voice_id:'voice-owl'}});
+ const changed=await (await request.post(endpoint,{data:{part:0}})).json();expect(changed.converted_lines).toBe(0);expect(changed.url).not.toBe(converted.url);
+ await request.put(`/api/characters/${line.character_id}/target-voice`,{data:{voice_id:'voice-wolf'}});
+ expect((await (await request.post(endpoint,{data:{part:0}})).json()).url).toBe(converted.url);
+ expect((await upload()).ok()).toBeTruthy();
+ expect((await (await request.post(endpoint,{data:{part:0}})).json()).converted_lines).toBe(0);
+ expect((await (await request.get('http://127.0.0.1:18089/test/state')).json()).calls).toBe(before+1);
 });

@@ -110,8 +110,8 @@ func (a *API) voiceSceneStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	var run, finished, jobs json.RawMessage
 	err = a.DB.QueryRow(r.Context(), `SELECT
- COALESCE((SELECT jsonb_build_object('id',id,'state',state,'error',error,'done',(SELECT count(*) FROM voice_jobs WHERE run_id=r.id AND state='complete'),'total',(SELECT count(*) FROM voice_jobs WHERE run_id=r.id)) FROM voice_runs r WHERE scene_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1),'null'::jsonb),
- COALESCE((SELECT jsonb_build_object('id',id,'snapshot_hash',snapshot_hash) FROM voice_runs WHERE scene_id=$1 AND state='complete' ORDER BY created_at DESC,id DESC LIMIT 1),'null'::jsonb),
+ COALESCE((SELECT jsonb_build_object('id',id,'state',state,'single_line',single_line,'error',error,'done',(SELECT count(*) FROM voice_jobs WHERE run_id=r.id AND state='complete'),'total',(SELECT count(*) FROM voice_jobs WHERE run_id=r.id)) FROM voice_runs r WHERE scene_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1),'null'::jsonb),
+ COALESCE((SELECT jsonb_build_object('id',id,'snapshot_hash',snapshot_hash) FROM voice_runs WHERE scene_id=$1 AND state='complete' AND NOT single_line ORDER BY created_at DESC,id DESC LIMIT 1),'null'::jsonb),
  COALESCE((SELECT jsonb_agg(x) FROM (SELECT DISTINCT ON(j.event_id) j.id,j.event_id,j.take_id,j.voice_id FROM voice_jobs j JOIN voice_runs r ON r.id=j.run_id WHERE r.scene_id=$1 AND j.state='complete' ORDER BY j.event_id,j.completed_at DESC,j.created_at DESC,j.id DESC)x),'[]'::jsonb)`, scene).Scan(&run, &finished, &jobs)
 	if err != nil {
 		a.failure(w, err)
@@ -172,6 +172,18 @@ func (a *API) queueVoiceScene(w http.ResponseWriter, r *http.Request) {
 		if hash != in.Snapshot {
 			return clientError{409, "The scene changed. Review the current takes and try again."}
 		}
+		if in.Event != "" {
+			var selected []voiceInput
+			for _, line := range lines {
+				if line.Event == in.Event {
+					selected = append(selected, line)
+				}
+			}
+			if len(selected) == 0 {
+				return clientError{400, "The selected line is not in this scene."}
+			}
+			lines = selected
+		}
 		if len(lines) == 0 || len(lines) > 120 {
 			return clientError{400, "Voice scenes with 1–120 lines."}
 		}
@@ -203,7 +215,7 @@ func (a *API) queueVoiceScene(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if in.Event == "" {
-			err = tx.QueryRow(r.Context(), `SELECT id::text FROM voice_runs WHERE scene_id=$1 AND snapshot_hash=$2 AND state='complete' AND id=(SELECT id FROM voice_runs WHERE scene_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1)`, scene, hash).Scan(&run)
+			err = tx.QueryRow(r.Context(), `SELECT id::text FROM voice_runs WHERE scene_id=$1 AND snapshot_hash=$2 AND state='complete' AND NOT single_line AND id=(SELECT id FROM voice_runs WHERE scene_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1)`, scene, hash).Scan(&run)
 			if err == nil {
 				return nil
 			}
@@ -211,7 +223,7 @@ func (a *API) queueVoiceScene(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if err = tx.QueryRow(r.Context(), `INSERT INTO voice_runs(scene_id,snapshot_hash,request_id,requested_by,forced_event) VALUES($1,$2,$3,$4,$5) RETURNING id::text`, scene, hash, in.RequestID, identity.Current(r.Context()).Email, in.Event).Scan(&run); err != nil {
+		if err = tx.QueryRow(r.Context(), `INSERT INTO voice_runs(scene_id,snapshot_hash,request_id,requested_by,forced_event,single_line) VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text`, scene, hash, in.RequestID, identity.Current(r.Context()).Email, in.Event, in.Event != "").Scan(&run); err != nil {
 			return err
 		}
 		for _, l := range lines {
@@ -227,9 +239,6 @@ func (a *API) queueVoiceScene(w http.ResponseWriter, r *http.Request) {
 						key = ""
 						completed = nil
 					}
-				}
-				if in.Event != "" && key == "" {
-					return clientError{409, "Other lines need conversion too. Use Voice scene first."}
 				}
 			}
 			state := "queued"

@@ -65,9 +65,15 @@ When all lines complete, StoryForge assembles one scene MP3, in script order wit
 it. Actors also see their selected line's latest converted recording, with their
 raw take history still available separately.
 
-**Regenerate line** is admin-only. It makes one new paid conversion, reuses the
-other completed lines, and rebuilds the scene. If other lines also need updating,
-use **Voice scene** first. Matching successful conversions are reused, including
+**Convert line** and **Regenerate line** are admin-only, under **Converted lines**
+or the selected line in the admin recording studio. Only that line needs a current
+take and target voice; the rest of the scene can be unfinished. Each action makes
+one paid conversion (or isolation), without rebuilding the full converted scene.
+Choose **Generate scene preview** afterward to hear the result in context. Previews
+prefer the latest successful conversion matching the selected take and target voice,
+then the raw take, then free computer speech. Changing the take or voice excludes
+outdated conversions. Generating previews never starts paid work.
+Use **Voice scene** to rebuild a fully converted scene. Matching successful conversions are reused, including
 after a partially failed run. New takes, changed voices, script edits or reordering
 mark the scene outdated; they never automatically spend credits. Earlier completed
 audio remains playable while new conversion is pending or failed.
@@ -85,7 +91,8 @@ on the existing recordings volume. They are persistent derived recordings, not
 the disposable offline preview cache. Keep backups of both the volume and the
 database. Prior successful conversions are retained for playback/reuse.
 
-ElevenLabs conversions support up to 120 lines and 20 minutes compiled.
+Whole-scene ElevenLabs conversions support up to 120 lines and 20 minutes compiled.
+Individual lines can be converted in larger scenes too.
 Free offline previews automatically split longer scenes into listening parts.
 Each source take is limited to five minutes. Very long scenes may need splitting.
 

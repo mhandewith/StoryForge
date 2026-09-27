@@ -7,7 +7,10 @@ take changes clear the displayed preview so it can be regenerated.
 
 Each line uses the currently assigned actor's preferred take for the current line
 revision, or their latest current-revision take if none is preferred. If there is
-no matching take, offline eSpeak NG speaks the dialogue. Characters receive a
+no matching take, offline eSpeak NG speaks the dialogue. When a successful ElevenLabs
+conversion or isolation matches the selected take and current target voice, the
+preview uses that audio instead of the raw take. Generate again after conversion
+to include it; preview generation never spends ElevenLabs credits. Characters receive a
 consistent English voice variant automatically. These basic synthetic voices are
 placeholders; the Target voice field is used separately for ElevenLabs conversion.
 Performance directions are displayed to actors, not spoken by the synthesizer.
