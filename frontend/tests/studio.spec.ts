@@ -46,7 +46,7 @@ test('prepare a family scene, edit it, and reload it from PostgreSQL', async ({p
   await page.reload();
   await page.getByLabel('Current project').selectOption({label:'The lantern in the woods'});
   await expect(page.locator('article.dialogue')).toHaveCount(10);
-  await expect(page.getByText('Did you see that tiny golden light?',{exact:true})).toBeVisible();
+  await expect(page.locator('.dialogue-text').filter({hasText:'Did you see that tiny golden light?'})).toBeVisible();
   await page.setViewportSize({width:1440,height:1080});
   await page.screenshot({path:'test-results/studio-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
