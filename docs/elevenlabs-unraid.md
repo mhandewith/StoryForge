@@ -3,7 +3,8 @@
 ## Connect the account
 
 In your ElevenLabs account, create an API key with access to **Voices** (read)
-and **Voice Changer**. In Unraid, edit the StoryForge container and add a Variable:
+and **Voice Changer**, plus **Audio Isolation** when using isolation. In Unraid,
+edit the StoryForge container and add a Variable:
 
 | Name and Key | Value |
 | --- | --- |
@@ -20,6 +21,15 @@ Open **Cast & characters**, select a **Target voice** for each character, and
 click **Save**. Existing free-text voice labels are retained as a reminder, but
 must be replaced with a real account voice. Assignments store the unique voice
 ID, so renaming an ElevenLabs voice does not disconnect it.
+
+For guest actors or anyone keeping their own voice, select **Isolation — keep
+original voice** and save. This sends the preferred raw take to ElevenLabs Audio
+Isolation instead of Voice Changer. Isolation removes background noise while
+retaining the performer’s voice; it also uses credits. A scene can mix both modes,
+and the server compiles their results together. The same admin-only regeneration,
+cache reuse, and original recording preservation apply. Changing between isolation
+and a character voice marks the existing result outdated. No new Unraid variable
+is needed; enable Audio Isolation on the existing API key.
 
 The server loads the account's voice list on demand and caches it for ten minutes.
 After creating a voice in ElevenLabs, click **Refresh voices** beside a character

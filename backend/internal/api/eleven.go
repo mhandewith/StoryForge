@@ -21,6 +21,10 @@ type ElevenVoice struct {
 	ID   string `json:"voice_id"`
 	Name string `json:"name"`
 }
+
+// Reserved application choice, never sent as a provider voice ID.
+const isolationVoiceID = "storyforge:audio-isolation:v1"
+
 type ElevenClient struct {
 	key, base string
 	http      *http.Client
@@ -89,6 +93,7 @@ func (c *ElevenClient) Voices(ctx context.Context, refresh bool) ([]ElevenVoice,
 		}
 		if !result.HasMore {
 			sort.Slice(voices, func(i, j int) bool { return voices[i].Name < voices[j].Name })
+			voices = append([]ElevenVoice{{isolationVoiceID, "Isolation — keep original voice"}}, voices...)
 			c.voices = voices
 			c.fetched = time.Now()
 			return append([]ElevenVoice{}, voices...), nil
@@ -131,12 +136,18 @@ func (c *ElevenClient) Convert(ctx context.Context, voice, source, destination s
 	if err != nil || n >= 50<<20 {
 		return errors.New("Recording could not be prepared for conversion.")
 	}
-	_ = form.WriteField("model_id", "eleven_multilingual_sts_v2")
-	// Explicit settings make the cache independent of external saved voice settings.
-	_ = form.WriteField("voice_settings", `{"stability":0.5,"similarity_boost":0.75,"style":0,"use_speaker_boost":true}`)
-	_ = form.WriteField("remove_background_noise", "false")
+	endpoint := c.base + "/v1/speech-to-speech/" + url.PathEscape(voice) + "?output_format=mp3_44100_128"
+	if voice == isolationVoiceID {
+		endpoint = c.base + "/v1/audio-isolation"
+		_ = form.WriteField("file_format", "other")
+	} else {
+		_ = form.WriteField("model_id", "eleven_multilingual_sts_v2")
+		// Explicit settings make the cache independent of external saved voice settings.
+		_ = form.WriteField("voice_settings", `{"stability":0.5,"similarity_boost":0.75,"style":0,"use_speaker_boost":true}`)
+		_ = form.WriteField("remove_background_noise", "false")
+	}
 	_ = form.Close()
-	req, err := http.NewRequestWithContext(ctx, "POST", c.base+"/v1/speech-to-speech/"+url.PathEscape(voice)+"?output_format=mp3_44100_128", &body)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, &body)
 	if err != nil {
 		return errors.New("Invalid conversion configuration.")
 	}
@@ -148,6 +159,9 @@ func (c *ElevenClient) Convert(ctx context.Context, voice, source, destination s
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if voice == isolationVoiceID && (res.StatusCode == 401 || res.StatusCode == 403) {
+			return errors.New("ElevenLabs rejected audio isolation. Check your API key and its Audio Isolation permission.")
+		}
 		return elevenStatus(res.StatusCode)
 	}
 	out, err := os.Create(destination)

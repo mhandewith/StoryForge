@@ -33,7 +33,7 @@ func TestVoiceLibraryPaginationCacheRefresh(t *testing.T) {
 	defer server.Close()
 	c := &ElevenClient{key: "test-secret", base: server.URL, http: server.Client()}
 	voices, err := c.Voices(context.Background(), false)
-	if err != nil || len(voices) != 2 || voices[0].Name != "Owl" {
+	if err != nil || len(voices) != 3 || voices[0].ID != isolationVoiceID || voices[1].Name != "Owl" {
 		t.Fatalf("unexpected voices %v %v", voices, err)
 	}
 	_, _ = c.Voices(context.Background(), false)
@@ -102,6 +102,58 @@ func TestConversionMultipartAndErrors(t *testing.T) {
 	err := c.Convert(context.Background(), "voice-123", source, output)
 	if err == nil || strings.Contains(err.Error(), "test-secret") || strings.Contains(err.Error(), "sensitive") {
 		t.Fatal("unsafe provider error")
+	}
+}
+
+func TestIsolationRequest(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "raw.wav")
+	_ = os.WriteFile(source, []byte("original performance"), 0600)
+	var denied atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/audio-isolation" || r.URL.RawQuery != "" || r.Header.Get("xi-api-key") != "test-secret" {
+			t.Error("wrong isolation endpoint or authentication")
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Error(err)
+			return
+		}
+		if r.FormValue("file_format") != "other" || r.FormValue("model_id") != "" || r.FormValue("voice_settings") != "" {
+			t.Error("wrong isolation fields")
+		}
+		f, _, err := r.FormFile("audio")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
+		b, _ := io.ReadAll(f)
+		if string(b) != "original performance" {
+			t.Error("wrong source")
+		}
+		if denied.Load() {
+			w.WriteHeader(403)
+			return
+		}
+		_, _ = w.Write([]byte("isolated performance"))
+	}))
+	defer server.Close()
+	c := &ElevenClient{key: "test-secret", base: server.URL, http: server.Client()}
+	output := filepath.Join(dir, "isolated.mp3")
+	if err := c.Convert(context.Background(), isolationVoiceID, source, output); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(output)
+	if string(b) != "isolated performance" {
+		t.Fatal("wrong output")
+	}
+	b, _ = os.ReadFile(source)
+	if string(b) != "original performance" {
+		t.Fatal("raw take changed")
+	}
+	denied.Store(true)
+	if err := c.Convert(context.Background(), isolationVoiceID, source, output); err == nil || !strings.Contains(err.Error(), "Audio Isolation permission") {
+		t.Fatalf("wrong permission error: %v", err)
 	}
 }
 

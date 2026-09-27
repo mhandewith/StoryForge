@@ -7,7 +7,7 @@ import threading
 import wave
 
 lock = threading.Lock()
-state = {'calls': 0, 'lists': 0, 'fail_next': False, 'delay': 0, 'extra_voice': False}
+state = {'calls': 0, 'isolations': 0, 'lists': 0, 'fail_next': False, 'delay': 0, 'extra_voice': False}
 audio = io.BytesIO()
 with wave.open(audio, 'wb') as wav:
     wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
@@ -38,10 +38,15 @@ class Handler(BaseHTTPRequestHandler):
             with lock: state.update(json.loads(body))
             return self.reply(200, {})
         if self.headers.get('xi-api-key') != 'test-key': return self.reply(401, {})
-        if self.path.startswith('/v1/speech-to-speech/'):
-            if b'eleven_multilingual_sts_v2' not in body or b'RIFF' not in body: return self.reply(422, {})
+        isolation = self.path == '/v1/audio-isolation'
+        if isolation or self.path.startswith('/v1/speech-to-speech/'):
+            if b'RIFF' not in body: return self.reply(422, {})
+            if isolation:
+                if b'name="model_id"' in body or b'name="voice_settings"' in body or b'name="file_format"' not in body: return self.reply(422, {})
+            elif b'eleven_multilingual_sts_v2' not in body: return self.reply(422, {})
             with lock:
                 state['calls'] += 1
+                if isolation: state['isolations'] += 1
                 fail, delay = state['fail_next'], state['delay']
                 state['fail_next'] = False
             time.sleep(delay)

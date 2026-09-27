@@ -18,17 +18,23 @@ test('admin selects voices and converts a scene; actors can listen but cannot re
  }
  await page.goto('/');await page.getByLabel('Current project').selectOption(project.id);
  await page.getByRole('button',{name:'Cast & characters'}).click();
- for(const c of characters){await page.getByLabel(`Target voice for ${c.name}`,{exact:true}).selectOption('voice-'+c.name.toLowerCase());await page.getByRole('button',{name:`Save target voice for ${c.name}`,exact:true}).click();await expect(page.getByRole('button',{name:`Save target voice for ${c.name}`,exact:true})).toBeDisabled();}
+ for(const c of characters){await page.getByLabel(`Target voice for ${c.name}`,{exact:true}).selectOption(c.name==='Owl'?'storyforge:audio-isolation:v1':'voice-'+c.name.toLowerCase());await page.getByRole('button',{name:`Save target voice for ${c.name}`,exact:true}).click();await expect(page.getByRole('button',{name:`Save target voice for ${c.name}`,exact:true})).toBeDisabled();}
  await page.getByRole('button',{name:'Refresh voices for Wolf',exact:true}).click();
  await expect(page.getByLabel('Target voice for Wolf',{exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Scenes & script'}).click();
  await expect(page.getByRole('button',{name:'Voice scene',exact:true})).toBeEnabled();
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Voice scene',exact:true}).click();
  await expect(page.getByLabel('ElevenLabs scene')).toContainText('Scene conversion complete',{timeout:60000});
+ const isolationCalls=(await (await request.get('http://127.0.0.1:18089/test/state')).json()).isolations;
+ expect(isolationCalls).toBeGreaterThan(0);
  const compiled=page.getByLabel('Play converted scene');await compiled.evaluate((el:HTMLAudioElement)=>el.play());await expect.poll(()=>compiled.evaluate((el:HTMLAudioElement)=>el.currentTime)).toBeGreaterThan(0);await compiled.evaluate((el:HTMLAudioElement)=>el.pause());
  await page.getByText('Converted lines',{exact:true}).click();
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Regenerate line 1',exact:true}).click();
  await expect(page.getByRole('button',{name:'Voice scene',exact:true})).toBeEnabled({timeout:60000});
+ expect((await (await request.get('http://127.0.0.1:18089/test/state')).json()).isolations).toBe(isolationCalls);
+ page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Regenerate line 2',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Voice scene',exact:true})).toBeEnabled({timeout:60000});
+ expect((await (await request.get('http://127.0.0.1:18089/test/state')).json()).isolations).toBe(isolationCalls+1);
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:'test-results/voicing-admin-mobile.png',fullPage:true});
  const context=await browser.newContext({baseURL:'http://127.0.0.1:18088',extraHTTPHeaders:{Authorization:`Bearer ${process.env.STORYFORGE_DEV_AUTH_TOKEN}`,'X-StoryForge-Dev-Email':'voice-browser@example.test'}});
  const actorPage=await context.newPage();await actorPage.goto('/');await actorPage.getByRole('button',{name:/A voiced scene/}).click();
