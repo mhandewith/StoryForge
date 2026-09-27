@@ -53,7 +53,8 @@ func nullableID(id string) any {
 const takeSelect = `SELECT t.id,t.event_id,t.actor_id,t.revision,t.take_number,t.preferred,t.created_at,
  a.duration_ms,a.mime_type,a.size_bytes,a.sha256,r.text,r.direction,r.character_id,
  c.name AS character_name,p.name AS project_name,s.name AS scene_name,
- t.revision<>e.revision AS stale,actor.name AS actor_name
+ t.revision<>e.revision AS stale,actor.name AS actor_name,
+ (t.revision=e.revision AND EXISTS(SELECT 1 FROM active_assignments ass WHERE ass.character_id=e.character_id AND (ass.actor_id IS NULL OR ass.actor_id=t.actor_id))) AS eligible
  FROM takes t JOIN audio_assets a ON a.id=t.asset_id
  JOIN script_event_revisions r ON r.event_id=t.event_id AND r.revision=t.revision
  JOIN active_events e ON e.id=t.event_id JOIN characters c ON c.id=r.character_id
@@ -61,7 +62,12 @@ const takeSelect = `SELECT t.id,t.event_id,t.actor_id,t.revision,t.take_number,t
 
 func (a *API) listTakes(w http.ResponseWriter, r *http.Request) {
 	u := identity.Current(r.Context())
-	a.row(w, r, 200, `SELECT COALESCE(jsonb_agg(x ORDER BY x.created_at DESC,x.id),'[]'::jsonb) FROM (`+takeSelect+` WHERE ($1::boolean OR t.actor_id=$2)) x`, u.Admin, nullableID(u.ActorID))
+	scene := r.URL.Query().Get("scene_id")
+	if scene != "" && !validID(scene) {
+		problem(w, 400, "Choose a valid scene.")
+		return
+	}
+	a.row(w, r, 200, `SELECT COALESCE(jsonb_agg(x ORDER BY x.created_at DESC,x.id),'[]'::jsonb) FROM (`+takeSelect+` WHERE ($1::boolean OR t.actor_id=$2) AND ($3::uuid IS NULL OR e.scene_id=$3)) x`, u.Admin, nullableID(u.ActorID), nullableID(scene))
 }
 func (a *API) uploadTake(w http.ResponseWriter, r *http.Request) {
 	u := identity.Current(r.Context())

@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {request} from './api';
+import type {Take} from './Studio';
 
 type Voice={voice_id:string;name:string};
 type Library={configured:boolean;voices:Voice[]};
@@ -18,15 +19,33 @@ type Line={event_id:string;take_id:string;voice_id:string;character:string;text:
 type Conversion={id:string;event_id:string;take_id:string;voice_id:string};
 type State={configured:boolean;ready:boolean;missing_takes:number;missing_voices:number;snapshot_hash:string;lines:Line[];run:null|{id:string;state:string;single_line:boolean;error:string;done:number;total:number};finished:null|{id:string;snapshot_hash:string};conversions:Conversion[]};
 function ConvertedPlayer({src,label}:{src:string;label:string}){return <audio controls preload="none" src={src} aria-label={label} onPlay={e=>{document.querySelectorAll('audio').forEach(a=>{if(a!==e.currentTarget)a.pause();});}}/>;}
+type AuditionTake=Take&{eligible:boolean};
+function TakeAudition({line,takes,disabled,onPrefer}:{line:Line;takes:AuditionTake[];disabled:boolean;onPrefer:(id:string)=>Promise<void>}){
+ const [selected,setSelected]=useState('');
+ const take=takes.find(t=>t.id===selected)||takes.find(t=>t.id===line.take_id)||takes[0];
+ if(!take)return <p>No recorded takes for this line yet.</p>;
+ return <div className="take-audition"><label>Recorded takes<select aria-label={`Take for line ${line.position}`} value={take.id} disabled={disabled} onChange={e=>setSelected(e.target.value)}>{takes.map(t=><option key={t.id} value={t.id}>{t.actor_name} · Take {t.take_number} · {new Date(t.created_at).toLocaleString()}{t.id===line.take_id?' · Preferred for conversion':''}{t.stale?' · Earlier script version':!t.eligible?' · Actor no longer assigned':''}</option>)}</select></label>
+ {!disabled&&<ConvertedPlayer key={take.id} src={`/api/actor/takes/${take.id}/audio`} label={`Play selected take for line ${line.position}`}/>}
+ <button className="secondary" aria-label={`Make selected take preferred for line ${line.position}`} disabled={disabled||!take.eligible||take.id===line.take_id} onClick={()=>void onPrefer(take.id)}>{take.id===line.take_id?'Preferred for conversion':'Make preferred'}</button>
+ <small>Choosing a take here only changes playback. Make it preferred to use it for conversion.</small>
+ {take.stale&&<details><summary>Words recorded in this take</summary><p>{take.text}</p>{take.direction&&<p>{take.direction}</p>}</details>}
+ </div>;
+}
 export function Voicing({sceneID,admin=false,eventID,version,disabled=false}:{sceneID:string;admin?:boolean;eventID?:string;version:string;disabled?:boolean}){
  const [state,setState]=useState<State>();const [error,setError]=useState('');const [busy,setBusy]=useState(false);const retry=useRef<{key:string;id:string}|undefined>(undefined);
- const current=useRef(0);
+ const [takes,setTakes]=useState<AuditionTake[]>([]);
+ const current=useRef(0);const selectionVersion=useRef(0);
  useEffect(()=>{
   const generation=++current.current;let stopped=false;let timer:ReturnType<typeof setTimeout>;
-  setState(undefined);setError('');setBusy(false);retry.current=undefined;
-  async function poll(){try{const s=await request<State>(`/api/actor/scenes/${sceneID}/voicing`);if(!stopped){setState(s);}}catch(e){if(!stopped)setError(message(e));}finally{if(!stopped)timer=setTimeout(poll,3000);}}
+  setState(undefined);setTakes([]);setError('');setBusy(false);retry.current=undefined;
+  async function poll(){const selection=selectionVersion.current;try{const [s,t]=await Promise.all([request<State>(`/api/actor/scenes/${sceneID}/voicing`),admin?request<AuditionTake[]>(`/api/actor/takes?scene_id=${sceneID}`):Promise.resolve([])]);if(!stopped&&selection===selectionVersion.current){setState(s);setTakes(t);}}catch(e){if(!stopped)setError(message(e));}finally{if(!stopped)timer=setTimeout(poll,3000);}}
   void poll();return()=>{stopped=true;clearTimeout(timer);if(current.current===generation)current.current++;};
- },[sceneID,version]);
+ },[sceneID,version,admin]);
+ async function prefer(id:string){
+  const generation=current.current;selectionVersion.current++;setBusy(true);setError('');
+  try{await request(`/api/actor/takes/${id}/preferred`,'PUT',{preferred:true});const [s,t]=await Promise.all([request<State>(`/api/actor/scenes/${sceneID}/voicing`),request<AuditionTake[]>(`/api/actor/takes?scene_id=${sceneID}`)]);if(current.current===generation){selectionVersion.current++;setState(s);setTakes(t);retry.current=undefined;}}
+  catch(e){if(current.current===generation)setError(message(e));}finally{if(current.current===generation)setBusy(false);}
+ }
  async function start(event=''){
   if(!state)return;
   if(!window.confirm(event?'Convert this line using ElevenLabs credits? Generate a scene preview afterward to hear it in context.':'Send the selected recordings to ElevenLabs? Voice changing and isolation both use your ElevenLabs credits. Completed matching lines will be reused.'))return;
@@ -40,7 +59,7 @@ export function Voicing({sceneID,admin=false,eventID,version,disabled=false}:{sc
  const audio=(id:string)=>`/api/actor/scenes/${sceneID}/converted/${id}`;
  const renderLine=(line:Line)=>{
   const c=state?.conversions.find(c=>c.event_id===line.event_id);const stale=c&&(c.take_id!==line.take_id||c.voice_id!==line.voice_id);
-  return <div className="converted-line" key={line.event_id}><strong>{line.position}. {line.character}</strong><p>{line.text}</p>{c?<><small>{stale?'Earlier take or voice — needs updating':'Latest converted line'}</small>{!disabled&&<ConvertedPlayer src={audio(c.id)} label={`Converted line ${line.position}`}/>}</>:<p>No converted recording yet.</p>}{admin&&<button className="secondary" disabled={busy||!!active||disabled||!line.take_id||!line.voice_id||!state?.configured} onClick={()=>void start(line.event_id)}>{c?'Regenerate':'Convert'} line {line.position}</button>}</div>;
+  return <div className="converted-line" key={line.event_id}><strong>{line.position}. {line.character}</strong><p>{line.text}</p>{admin&&<TakeAudition line={line} takes={takes.filter(t=>t.event_id===line.event_id)} disabled={disabled||busy||!!active} onPrefer={prefer}/>} {c?<><small>{stale?'Earlier take or voice — needs updating':'Latest converted line'}</small>{!disabled&&<ConvertedPlayer src={audio(c.id)} label={`Converted line ${line.position}`}/>}</>:<p>No converted recording yet.</p>}{admin&&<button className="secondary" disabled={busy||!!active||disabled||!line.take_id||!line.voice_id||!state?.configured} onClick={()=>void start(line.event_id)}>{c?'Regenerate':'Convert'} line {line.position}</button>}</div>;
  };
  return <section className="voicing" aria-label="ElevenLabs scene"><h3>Character voices</h3>
  {error&&<p role="alert" className="banner error">{error}</p>}

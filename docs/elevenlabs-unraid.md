@@ -67,6 +67,12 @@ raw take history still available separately.
 
 **Convert line** and **Regenerate line** are admin-only, under **Converted lines**
 or the selected line in the admin recording studio. Only that line needs a current
+take and target voice. Each line also has a **Recorded takes** dropdown and raw
+audio player for auditioning every actor's takes. Selecting one only changes
+playback; click **Make preferred** to use it for conversion. Earlier script versions
+and takes from actors no longer assigned remain playable but cannot be preferred
+from this panel. Only admins see this cross-actor take selector.
+Only the selected line needs a current
 take and target voice; the rest of the scene can be unfinished. Each action makes
 one paid conversion (or isolation), without rebuilding the full converted scene.
 Choose **Generate scene preview** afterward to hear the result in context. Previews
