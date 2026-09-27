@@ -247,8 +247,13 @@ func (a *API) assign(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if !validID(in.ActorID) || !validID(r.PathValue("characterID")) {
+	if (in.ActorID != "any" && !validID(in.ActorID)) || !validID(r.PathValue("characterID")) {
 		problem(w, 400, "Choose a character and actor.")
+		return
+	}
+	if in.ActorID == "any" {
+		a.row(w, r, 200, `INSERT INTO assignments(character_id,actor_id) SELECT id,NULL FROM active_characters WHERE id=$1
+ ON CONFLICT (character_id) DO UPDATE SET actor_id=NULL RETURNING row_to_json(assignments)`, r.PathValue("characterID"))
 		return
 	}
 	a.row(w, r, 200, `INSERT INTO assignments(character_id,actor_id) SELECT c.id,a.id FROM active_characters c CROSS JOIN active_actors a WHERE c.id=$1 AND a.id=$2

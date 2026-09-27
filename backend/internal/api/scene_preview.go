@@ -45,12 +45,12 @@ func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, er
  SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms
  FROM active_events e LEFT JOIN active_assignments ass ON ass.character_id=e.character_id
  LEFT JOIN LATERAL (SELECT asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
- WHERE tk.event_id=e.id AND tk.revision=e.revision AND tk.actor_id=ass.actor_id
+ WHERE tk.event_id=e.id AND tk.revision=e.revision AND ass.character_id IS NOT NULL AND (tk.actor_id=ass.actor_id OR ass.actor_id IS NULL)
  ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
  WHERE e.scene_id=s.id) x),'[]'::jsonb)
  FROM active_scenes s WHERE s.id=$1 AND ($2::boolean OR EXISTS(
  SELECT 1 FROM active_events e JOIN active_assignments ass ON ass.character_id=e.character_id
- WHERE e.scene_id=s.id AND ass.actor_id=$3))`, scene, u.Admin, nullableID(u.ActorID)).Scan(&raw)
+ WHERE e.scene_id=s.id AND $3::uuid IS NOT NULL AND (ass.actor_id=$3 OR ass.actor_id IS NULL)))`, scene, u.Admin, nullableID(u.ActorID)).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}

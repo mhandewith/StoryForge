@@ -40,6 +40,13 @@ missing/deleted voices.
 ## Voice a completed scene
 
 Every line must have a current take from its assigned actor and a target voice.
+Choose **Any actor** under **Played by** to offer a role to every linked actor.
+Each performer can record and replay their own takes. Admins can compare everyone's
+performances under **Review takes** and mark one preferred across all actors.
+Previews and ElevenLabs use that selection. The newest upload becomes preferred
+by default, including uploads after an admin selection. Assigning the role back to
+one actor restricts new recordings and selects only that actor's eligible takes;
+other recordings remain saved. Unassigned roles are not open to everyone.
 New recordings automatically become preferred. Admins can listen to all takes
 under **Review takes** and mark an older take preferred; actors cannot change
 that selection manually. A subsequent new recording becomes preferred again.

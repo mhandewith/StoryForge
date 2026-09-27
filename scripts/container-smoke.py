@@ -383,7 +383,33 @@ def voicing_checks():
            "INSERT INTO voice_runs(id,scene_id,snapshot_hash,request_id,requested_by) SELECT '"+queued+"',scene_id,snapshot_hash,gen_random_uuid(),'ci@example.test' FROM voice_runs WHERE id='"+done['finished']['id']+"'; INSERT INTO voice_jobs(run_id,event_id,take_id,voice_id,position,source_key,state) SELECT '"+queued+"',event_id,take_id,voice_id,position,source_key,'queued' FROM voice_jobs WHERE run_id='"+done['finished']['id']+"';")
     calls=fake_eleven()['calls'];docker('start',APP);ready();resumed=wait_run()
     assert resumed['finished']['id']==queued and fake_eleven()['calls']==calls+2, 'Queued work did not resume after restart'
-    print('Voice refresh/cache, readiness, paid-request deduplication, line reuse, regeneration, actor playback, stale takes and conservative restart recovery passed.')
+    # Open roles appear for every linked actor, but raw takes remain private.
+    guest=api('/api/actors',{'name':'Open role guest'},expected=201)
+    api('/api/actors/'+guest['id']+'/login',{'email':'open-guest@example.test'},'PUT')
+    character=lines[0]['character_id'];assignment='/api/assignments/'+character
+    api(assignment,{'actor_id':'any'},'PUT',expected=403,email='open-guest@example.test')
+    api(assignment,{'actor_id':'any'},'PUT')
+    workspace=api('/api/actor/workspace',email='open-guest@example.test')
+    assert any(s['id']==scene['id'] for s in workspace['scenes'])
+    assert any(a['character_id']==character and a['actor_id'] is None for a in workspace['assignments'])
+    guest_take=json.loads(audio_request('/api/actor/events/'+lines[0]['id']+'/takes?revision=1',raw,'POST',201,email='open-guest@example.test',extra={'Content-Type':'audio/wav','X-Upload-ID':secrets.token_hex(16)}))
+    assert next(l for l in api(status_path)['lines'] if l['event_id']==lines[0]['id'])['take_id']==guest_take['id']
+    api('/api/actor/takes/'+takes[0]['id']+'/preferred',{'preferred':True},'PUT',expected=403,email='open-guest@example.test')
+    api('/api/actor/takes/'+takes[0]['id']+'/preferred',{'preferred':True},'PUT')
+    assert next(l for l in api(status_path)['lines'] if l['event_id']==lines[0]['id'])['take_id']==takes[0]['id']
+    assert len([t for t in api('/api/actor/takes') if t['event_id']==lines[0]['id'] and t['preferred']])==1
+    assert all(t['actor_id']==guest['id'] for t in api('/api/actor/takes',email='open-guest@example.test'))
+    audio_request('/api/actor/takes/'+takes[0]['id']+'/audio',expected=404,email='open-guest@example.test')
+    preview=api('/api/actor/scenes/'+scene['id']+'/preview',{},'POST',email='open-guest@example.test')
+    assert preview['recorded_lines']==2
+    assert len(audio_request(preview['url'],email='open-guest@example.test'))>1000
+    enqueue();done=wait_run()
+    assert len(audio_request('/api/actor/scenes/'+scene['id']+'/converted/'+done['finished']['id'],email='open-guest@example.test'))>1000
+    api(assignment,{'actor_id':actor['id']},'PUT')
+    assert not any(s['id']==scene['id'] for s in api('/api/actor/workspace',email='open-guest@example.test')['scenes'])
+    audio_request(preview['url'],expected=404,email='open-guest@example.test')
+    audio_request('/api/actor/events/'+lines[0]['id']+'/takes?revision=1',raw,'POST',403,email='open-guest@example.test',extra={'Content-Type':'audio/wav','X-Upload-ID':secrets.token_hex(16)})
+    print('Voicing queue, open roles, cross-actor preference, private raw audio and restart recovery passed.')
 
 
 def restart():

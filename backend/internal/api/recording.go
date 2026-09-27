@@ -35,13 +35,13 @@ func (a *API) registerRecording(m *http.ServeMux) {
 
 func (a *API) actorWorkspace(w http.ResponseWriter, r *http.Request) {
 	u := identity.Current(r.Context())
-	a.row(w, r, 200, `WITH my_scenes AS (SELECT DISTINCT e.scene_id FROM active_events e JOIN active_assignments a ON a.character_id=e.character_id WHERE a.actor_id=$1)
+	a.row(w, r, 200, `WITH my_scenes AS (SELECT DISTINCT e.scene_id FROM active_events e JOIN active_assignments a ON a.character_id=e.character_id WHERE $1::uuid IS NOT NULL AND (a.actor_id=$1 OR a.actor_id IS NULL))
  SELECT jsonb_build_object(
  'projects',COALESCE((SELECT jsonb_agg(p ORDER BY p.created_at,p.id) FROM active_projects p WHERE p.id IN(SELECT project_id FROM active_scenes WHERE id IN(SELECT scene_id FROM my_scenes))),'[]'::jsonb),
  'scenes',COALESCE((SELECT jsonb_agg(s ORDER BY s.position,s.id) FROM active_scenes s WHERE s.id IN(SELECT scene_id FROM my_scenes)),'[]'::jsonb),
  'characters',COALESCE((SELECT jsonb_agg(c ORDER BY c.name,c.id) FROM active_characters c WHERE c.id IN(SELECT character_id FROM active_events WHERE scene_id IN(SELECT scene_id FROM my_scenes))),'[]'::jsonb),
  'events',COALESCE((SELECT jsonb_agg(e ORDER BY e.position,e.id) FROM active_events e WHERE e.scene_id IN(SELECT scene_id FROM my_scenes)),'[]'::jsonb),
- 'assignments',COALESCE((SELECT jsonb_agg(a) FROM active_assignments a WHERE a.actor_id=$1),'[]'::jsonb), 'actors','[]'::jsonb)`, nullableID(u.ActorID))
+ 'assignments',COALESCE((SELECT jsonb_agg(a) FROM active_assignments a WHERE $1::uuid IS NOT NULL AND (a.actor_id=$1 OR a.actor_id IS NULL)),'[]'::jsonb), 'actors','[]'::jsonb)`, nullableID(u.ActorID))
 }
 func nullableID(id string) any {
 	if id == "" {
@@ -89,7 +89,7 @@ func (a *API) uploadTake(w http.ResponseWriter, r *http.Request) {
 	}
 	// Authorize before accepting a potentially large upload; recheck inside the commit.
 	var permitted bool
-	err = a.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM active_events e JOIN active_assignments a ON a.character_id=e.character_id WHERE e.id=$1 AND a.actor_id=$2)`, event, u.ActorID).Scan(&permitted)
+	err = a.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM active_events e JOIN active_assignments a ON a.character_id=e.character_id WHERE e.id=$1 AND (a.actor_id=$2 OR a.actor_id IS NULL))`, event, u.ActorID).Scan(&permitted)
 	if err != nil {
 		a.failure(w, err)
 		return
@@ -154,7 +154,7 @@ func (a *API) uploadTake(w http.ResponseWriter, r *http.Request) {
 			return e
 		}
 		var current int
-		if e = tx.QueryRow(ctx, `SELECT e.revision FROM active_events e JOIN active_assignments a ON a.character_id=e.character_id WHERE e.id=$1 AND a.actor_id=$2`, event, u.ActorID).Scan(&current); e != nil {
+		if e = tx.QueryRow(ctx, `SELECT e.revision FROM active_events e JOIN active_assignments a ON a.character_id=e.character_id WHERE e.id=$1 AND (a.actor_id=$2 OR a.actor_id IS NULL)`, event, u.ActorID).Scan(&current); e != nil {
 			return clientError{409, "The line or assignment changed. Download your take before reloading."}
 		}
 		if current != revision {
@@ -164,7 +164,7 @@ func (a *API) uploadTake(w http.ResponseWriter, r *http.Request) {
 		if e = tx.QueryRow(ctx, `INSERT INTO audio_assets(storage_key,sha256,mime_type,size_bytes,duration_ms,sample_rate,channels) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`, key, digest, contentType, size, info.Duration, info.Rate, info.Channels).Scan(&asset); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `UPDATE takes SET preferred=false WHERE event_id=$1 AND actor_id=$2 AND preferred`, event, u.ActorID); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE takes SET preferred=false WHERE event_id=$1 AND preferred`, event); e != nil {
 			return e
 		}
 		if e = tx.QueryRow(ctx, `INSERT INTO takes(event_id,revision,actor_id,asset_id,take_number,preferred,request_id)
@@ -213,7 +213,7 @@ func (a *API) preferTake(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if in.Preferred {
-			if _, err := tx.Exec(ctx, `UPDATE takes SET preferred=false WHERE event_id=$1 AND actor_id=$2 AND preferred`, event, actor); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE takes SET preferred=false WHERE event_id=$1 AND preferred`, event); err != nil {
 				return err
 			}
 		}
