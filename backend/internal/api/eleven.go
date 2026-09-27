@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type ElevenVoice struct {
@@ -117,6 +118,51 @@ func elevenStatus(code int) error {
 	}
 	return fmt.Errorf("ElevenLabs returned HTTP %d. Check your account before retrying; the request may have used credits.", code)
 }
+
+// Parse only structured rejection fields, never an arbitrary HTML/text response.
+// Keep diagnostics bounded and remove credentials before persisting/displaying them.
+func (c *ElevenClient) rejection(res *http.Response, operation string) error {
+	if res.StatusCode == http.StatusBadRequest {
+		var payload struct {
+			Detail  json.RawMessage `json:"detail"`
+			Message string          `json:"message"`
+		}
+		if err := json.NewDecoder(io.LimitReader(res.Body, 16<<10)).Decode(&payload); err == nil {
+			var detail struct {
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(payload.Detail, &detail) != nil {
+				_ = json.Unmarshal(payload.Detail, &detail.Message)
+			}
+			if detail.Message == "" {
+				detail.Message = payload.Message
+			}
+			clean := func(value string) string {
+				if c.key != "" {
+					value = strings.ReplaceAll(value, c.key, "[redacted]")
+				}
+				value = strings.Map(func(r rune) rune {
+					if unicode.IsControl(r) {
+						return ' '
+					}
+					return r
+				}, value)
+				runes := []rune(strings.TrimSpace(value))
+				if len(runes) > 600 {
+					return string(runes[:600]) + "…"
+				}
+				return string(runes)
+			}
+			status, message := clean(detail.Status), clean(detail.Message)
+			if message != "" || status != "" {
+				return fmt.Errorf("ElevenLabs rejected %s (HTTP 400): %s", operation, strings.TrimSpace(status+" "+message))
+			}
+		}
+		return fmt.Errorf("ElevenLabs rejected %s (HTTP 400) without a readable reason. Check the request in ElevenLabs before retrying.", operation)
+	}
+	return elevenStatus(res.StatusCode)
+}
 func (c *ElevenClient) Convert(ctx context.Context, voice, source, destination string) error {
 	if !c.Enabled() {
 		return errors.New("ElevenLabs is not configured.")
@@ -162,7 +208,11 @@ func (c *ElevenClient) Convert(ctx context.Context, voice, source, destination s
 		if voice == isolationVoiceID && (res.StatusCode == 401 || res.StatusCode == 403) {
 			return errors.New("ElevenLabs rejected audio isolation. Check your API key and its Audio Isolation permission.")
 		}
-		return elevenStatus(res.StatusCode)
+		operation := "voice conversion"
+		if voice == isolationVoiceID {
+			operation = "audio isolation"
+		}
+		return c.rejection(res, operation)
 	}
 	out, err := os.Create(destination)
 	if err != nil {

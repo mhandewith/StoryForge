@@ -157,6 +157,26 @@ func TestIsolationRequest(t *testing.T) {
 	}
 }
 
+func TestBadRequestDiagnostics(t *testing.T) {
+	c := &ElevenClient{key: "test-secret"}
+	for _, tc := range []struct{ body, want string }{
+		{`{"detail":{"status":"invalid_audio","message":"Cannot decode input"}}`, "invalid_audio Cannot decode input"},
+		{`{"detail":"Unsupported recording"}`, "Unsupported recording"},
+		{`{"message":"Request test-secret rejected"}`, "Request [redacted] rejected"},
+		{`<html>test-secret upstream failure</html>`, "without a readable reason"},
+	} {
+		res := &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(tc.body))}
+		err := c.rejection(res, "audio isolation")
+		if !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "test-secret") || !strings.Contains(err.Error(), "audio isolation") {
+			t.Fatalf("unexpected diagnostic: %v", err)
+		}
+	}
+	res := &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(`{"detail":"` + strings.Repeat("x", 3000) + `"}`))}
+	if len(c.rejection(res, "audio isolation").Error()) > 750 {
+		t.Fatal("unbounded error message")
+	}
+}
+
 func TestVoiceHashTracksSelection(t *testing.T) {
 	lines := []voiceInput{{Event: "one", Take: "a", Voice: "wolf", Revision: 1, Position: 1}, {Event: "two", Take: "b", Voice: "owl", Revision: 1, Position: 2}}
 	initial := voiceHash(lines)
