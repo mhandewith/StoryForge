@@ -5,6 +5,8 @@ import json
 import time
 import threading
 import wave
+from email.parser import BytesParser
+from email.policy import default
 
 lock = threading.Lock()
 state = {'calls': 0, 'isolations': 0, 'lists': 0, 'fail_next': False, 'delay': 0, 'extra_voice': False}
@@ -43,6 +45,10 @@ class Handler(BaseHTTPRequestHandler):
             if b'RIFF' not in body: return self.reply(422, {})
             if isolation:
                 if b'name="model_id"' in body or b'name="voice_settings"' in body or b'name="file_format"' not in body: return self.reply(422, {})
+                message=BytesParser(policy=default).parsebytes(('Content-Type: '+self.headers['Content-Type']+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+body)
+                uploaded=next(p.get_payload(decode=True) for p in message.iter_parts() if p.get_param('name',header='content-disposition')=='audio')
+                with wave.open(io.BytesIO(uploaded),'rb') as wav:
+                    if wav.getnframes()/wav.getframerate()<4.6: return self.reply(400,{'detail':{'status':'invalid_audio_duration','message':'Minimum duration is 4.6 seconds'}})
             elif b'eleven_multilingual_sts_v2' not in body: return self.reply(422, {})
             with lock:
                 state['calls'] += 1
@@ -51,7 +57,7 @@ class Handler(BaseHTTPRequestHandler):
                 state['fail_next'] = False
             time.sleep(delay)
             if fail: return self.reply(429, {})
-            return self.reply(200, audio.getvalue(), 'audio/mpeg')
+            return self.reply(200, uploaded if isolation else audio.getvalue(), 'audio/mpeg')
         self.reply(404, {})
 
 ThreadingHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()

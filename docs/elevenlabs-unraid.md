@@ -31,6 +31,12 @@ cache reuse, and original recording preservation apply. Changing between isolati
 and a character voice marks the existing result outdated. No new Unraid variable
 is needed; enable Audio Isolation on the existing API key.
 
+Short Isolation takes are automatically padded with silence on both ends to five
+seconds to satisfy the provider's minimum duration. After isolation, StoryForge
+checks the returned duration and trims the added padding. If the duration changes
+unexpectedly, it stops rather than risk clipping speech. Raw recordings are never
+modified. The padded duration is sent to ElevenLabs and may affect credit usage.
+
 The server loads the account's voice list on demand and caches it for ten minutes.
 After creating a voice in ElevenLabs, click **Refresh voices** beside a character
 to bypass the cache. A failed refresh leaves existing assignments intact. Before

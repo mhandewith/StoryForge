@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -190,12 +191,48 @@ func (a *API) convertVoiceLine(ctx context.Context, voice, source, key string) e
 	if err = cmd.Run(); err != nil {
 		return errors.New("Original recording could not be prepared. Check the recording volume.")
 	}
+	var originalMS, paddingMS int
+	if voice == isolationVoiceID {
+		info, e := inspectAudio(ctx, wav)
+		if e != nil {
+			return e
+		}
+		originalMS = info.Duration
+		if originalMS < 5000 {
+			paddingMS = (5000 - originalMS + 1) / 2
+			padded := filepath.Join(dir, "padded.wav")
+			filter := fmt.Sprintf("adelay=%d:all=1,apad=whole_dur=5", paddingMS)
+			cmd = exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", wav, "-af", filter, "-c:a", "pcm_s16le", padded)
+			if err = cmd.Run(); err != nil {
+				return errors.New("Could not pad the short recording for isolation.")
+			}
+			wav = padded
+		}
+	}
 	output := filepath.Join(dir, "converted.mp3")
 	if err = a.Eleven.Convert(ctx, voice, wav, output); err != nil {
 		return err
 	}
-	if _, err = inspectAudio(ctx, output); err != nil {
+	info, err := inspectAudio(ctx, output)
+	if err != nil {
 		return errors.New("ElevenLabs returned invalid or oversized audio. The request may have used credits; check before retrying.")
+	}
+	if paddingMS > 0 {
+		// Allow codec frame rounding, but do not trim if the provider removed silence
+		// or changed the overall timing. Never automatically repeat a paid request.
+		if info.Duration < 4850 || info.Duration > 5150 {
+			return errors.New("Isolation changed the padded recording's duration. Stopped before trimming to avoid clipping speech. Check ElevenLabs before retrying; credits may have been used.")
+		}
+		trimmed := filepath.Join(dir, "trimmed.mp3")
+		filter := fmt.Sprintf("atrim=start=%.3f:end=%.3f,asetpts=PTS-STARTPTS", float64(paddingMS)/1000, float64(paddingMS+originalMS)/1000)
+		cmd = exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", output, "-af", filter, "-c:a", "libmp3lame", "-b:a", "128k", trimmed)
+		if err = cmd.Run(); err != nil {
+			return errors.New("Could not trim the isolated recording. Check storage before retrying; credits may have been used.")
+		}
+		if _, err = inspectAudio(ctx, trimmed); err != nil {
+			return errors.New("Trimmed isolation audio failed validation. Credits may have been used.")
+		}
+		output = trimmed
 	}
 	if err = os.Rename(output, filepath.Join(a.RecordingsDir, key)); err != nil {
 		return errors.New("Converted audio could not be installed. Check storage; the request may have used credits.")

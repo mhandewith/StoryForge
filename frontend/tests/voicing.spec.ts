@@ -54,6 +54,11 @@ test('admin selects voices and converts a scene; actors can listen but cannot re
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Regenerate line 2',exact:true}).click();
  await expect(page.getByRole('button',{name:'Voice scene',exact:true})).toBeEnabled({timeout:60000});
  expect((await (await request.get('http://127.0.0.1:18089/test/state')).json()).isolations).toBe(isolationCalls+1);
+ const isolated=page.getByLabel('Converted line 2',{exact:true});
+ await isolated.evaluate((el:HTMLAudioElement)=>el.play());
+ await expect.poll(()=>isolated.evaluate((el:HTMLAudioElement)=>el.duration)).toBeLessThan(1.2);
+ expect(await isolated.evaluate((el:HTMLAudioElement)=>el.duration)).toBeGreaterThan(.9);
+ await isolated.evaluate((el:HTMLAudioElement)=>el.pause());
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:'test-results/voicing-admin-mobile.png',fullPage:true});
  const context=await browser.newContext({baseURL:'http://127.0.0.1:18088',extraHTTPHeaders:{Authorization:`Bearer ${process.env.STORYFORGE_DEV_AUTH_TOKEN}`,'X-StoryForge-Dev-Email':'voice-browser@example.test'}});
  const actorPage=await context.newPage();await actorPage.goto('/');await actorPage.getByRole('button',{name:/A voiced scene/}).click();
