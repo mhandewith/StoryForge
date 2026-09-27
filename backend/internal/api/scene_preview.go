@@ -33,6 +33,7 @@ type previewLine struct {
 	Text      string `json:"text"`
 	Revision  int    `json:"revision"`
 	Source    string `json:"source"`
+	Duration  int    `json:"duration_ms"`
 }
 
 // One SQL statement captures ordering, assignment and chosen takes together.
@@ -41,9 +42,9 @@ func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, er
 	u := identity.Current(ctx)
 	var raw []byte
 	err := a.DB.QueryRow(ctx, `SELECT COALESCE((SELECT jsonb_agg(x ORDER BY x.position,x.id) FROM (
- SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(t.storage_key,'') AS source
+ SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms
  FROM active_events e LEFT JOIN active_assignments ass ON ass.character_id=e.character_id
- LEFT JOIN LATERAL (SELECT asset.storage_key FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
+ LEFT JOIN LATERAL (SELECT asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
  WHERE tk.event_id=e.id AND tk.revision=e.revision AND tk.actor_id=ass.actor_id
  ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
  WHERE e.scene_id=s.id) x),'[]'::jsonb)
@@ -70,7 +71,36 @@ func previewVoice(character string) string {
 	return voices[int(h[0])%len(voices)]
 }
 
+// Keep each HTTP render small enough for the tunnel and bound temporary audio.
+// Duration estimates leave ample room below the compiler's twenty-minute limit.
+func previewParts(lines []previewLine) [][]previewLine {
+	var parts [][]previewLine
+	start, duration := 0, 0
+	for i, line := range lines {
+		ms := line.Duration
+		if line.Source == "" || ms <= 0 {
+			ms = len(strings.Fields(line.Text))*600 + 2000
+		}
+		if i > start && (i-start >= 40 || duration+ms+300 > 10*60*1000) {
+			parts = append(parts, lines[start:i])
+			start, duration = i, 0
+		}
+		duration += ms + 300
+	}
+	if start < len(lines) {
+		parts = append(parts, lines[start:])
+	}
+	return parts
+}
+
 func (a *API) renderScene(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Part     int    `json:"part"`
+		Snapshot string `json:"snapshot"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
 	id := r.PathValue("id")
 	if !validID(id) {
 		problem(w, 400, "Choose a scene.")
@@ -95,10 +125,21 @@ func (a *API) renderScene(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "Add dialogue before generating a preview.")
 		return
 	}
-	if len(lines) > 120 {
-		problem(w, 400, "Preview up to 120 lines at a time. Split this scene into smaller scenes.")
+	snapshot := previewKey(lines)
+	if in.Snapshot != "" && in.Snapshot != snapshot {
+		problem(w, 409, "The scene changed while building its preview. Generate again to include the latest changes.")
 		return
 	}
+	parts := previewParts(lines)
+	if in.Part < 0 || in.Part >= len(parts) {
+		problem(w, 400, "Choose an available preview part.")
+		return
+	}
+	start := 1
+	for _, part := range parts[:in.Part] {
+		start += len(part)
+	}
+	lines = parts[in.Part]
 	key := previewKey(lines)
 	dir := filepath.Join(a.RecordingsDir, "scene-previews")
 	file := filepath.Join(dir, id+"-"+key+".mp3")
@@ -133,7 +174,7 @@ func (a *API) renderScene(w http.ResponseWriter, r *http.Request) {
 			recorded++
 		}
 	}
-	JSON(w, 200, map[string]any{"url": "/api/actor/scenes/" + id + "/preview/" + key, "recorded_lines": recorded, "synthetic_lines": len(lines) - recorded})
+	JSON(w, 200, map[string]any{"url": "/api/actor/scenes/" + id + "/preview/" + key, "recorded_lines": recorded, "synthetic_lines": len(lines) - recorded, "part": in.Part, "parts": len(parts), "start_line": start, "end_line": start + len(lines) - 1, "snapshot": snapshot})
 }
 
 func (a *API) sceneAudio(w http.ResponseWriter, r *http.Request) {

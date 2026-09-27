@@ -68,7 +68,8 @@ on the existing recordings volume. They are persistent derived recordings, not
 the disposable offline preview cache. Keep backups of both the volume and the
 database. Prior successful conversions are retained for playback/reuse.
 
-Scene limits match offline previews: up to 120 lines and 20 minutes compiled.
+ElevenLabs conversions support up to 120 lines and 20 minutes compiled.
+Free offline previews automatically split longer scenes into listening parts.
 Each source take is limited to five minutes. Very long scenes may need splitting.
 
 Integration tests use a disposable fake provider with a dummy key. Never set
