@@ -56,8 +56,11 @@ Goodnight.`;
   await expect(page.locator('article.dialogue').first()).toContainText('Edited second voice.');
 
   // Keyboard and pointer scene moves both persist; selected scene stays selected.
+  await expect(page.getByRole('heading',{name:'Add dialogue',exact:true})).toBeVisible();
   const sceneHandle=page.getByRole('button',{name:'Select or move scene 1',exact:true});
+  await expect(sceneHandle).toBeEnabled();
   await sceneHandle.focus();
+  await expect(sceneHandle).toBeFocused();
   await page.keyboard.press('Space',{delay:100});
   await expect(sceneHandle).toHaveAttribute('aria-pressed','true');
   await page.keyboard.press('ArrowDown',{delay:100});
