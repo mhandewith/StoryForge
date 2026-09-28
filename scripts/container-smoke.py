@@ -415,7 +415,7 @@ def voicing_checks():
     export_path='/api/projects/'+p['id']+'/export'
     audio_request(export_path,expected=403,email='conversion@example.test')
     def read_export():
-        archive=zipfile.ZipFile(io.BytesIO(audio_request(export_path)))
+        archive=zipfile.ZipFile(io.BytesIO(audio_request(export_path,email='admin@example.test'))))
         manifest=json.loads(archive.read('manifest.json'))
         files=[l['file'] for l in manifest['lines'] if l['file']]
         assert files==sorted(files) and all('..' not in f and not f.startswith('/') for f in files)
