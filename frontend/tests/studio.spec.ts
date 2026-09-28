@@ -40,6 +40,7 @@ test('prepare a family scene, edit it, and reload it from PostgreSQL', async ({p
   }
   await expect(page.locator('article.dialogue')).toHaveCount(10);
   await page.getByRole('button',{name:'Edit or move line 1',exact:true}).click();
+  await expect(page.locator('article.dialogue').first().getByLabel('Dialogue',{exact:true})).toBeVisible();
   await page.getByLabel('Dialogue',{exact:true}).fill('Did you see that tiny golden light?');
   await page.getByRole('button',{name:'Save changes',exact:true}).click();
   await expect(page.locator('.dialogue-text').filter({hasText:'Did you see that tiny golden light?'})).toBeVisible();

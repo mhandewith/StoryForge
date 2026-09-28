@@ -335,9 +335,8 @@ build. The workflow uses GitHub's built-in token. Public package visibility
 allows Unraid downloads without credentials. For a private package, use
 `docker login ghcr.io -u mhandewith` and a classic token with `read:packages`.
 
-This milestone uses one actor per character. It does not yet provide
-scene rendering, voice conversion, archive browsing, or
-project/actor/character renaming.
+Characters can be assigned to one actor or opened to any actor. Archive browsing
+and project/actor/character renaming are not yet available.
 
 Official references:
 [Unraid container settings](https://docs.unraid.net/unraid-os/using-unraid-to/run-docker-containers/managing-and-customizing-containers/),
@@ -347,3 +346,6 @@ Official references:
 Whole-scene audio: [server-generated scene previews](docs/scene-previews.md).
 
 ElevenLabs setup and conversion workflow: [Unraid voice conversion guide](docs/elevenlabs-unraid.md).
+
+Countdown, team recording, Review Takes, and ordered audio exports:
+[recording workflow](docs/recording-workflow.md).

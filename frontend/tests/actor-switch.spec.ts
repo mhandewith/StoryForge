@@ -21,7 +21,7 @@ test('administrator changes actors without mixing recordings or discarding unsav
  await expect(page.getByRole('button',{name:/Phone scene 1/})).toHaveCount(0);
  await page.getByRole('button',{name:/Phone scene 0/}).click();
  await page.getByRole('button',{name:'● Record',exact:true}).click();
- await expect(page.locator('.recording-state')).toContainText('0:01');
+ await expect(page.locator('.recording-state')).toContainText('0:01',{timeout:10000});
  await page.getByRole('button',{name:'■ Stop recording'}).click();
  await expect(page.getByLabel('Listen to your new take')).toBeVisible();
  page.once('dialog',d=>d.dismiss());
@@ -39,7 +39,7 @@ test('administrator changes actors without mixing recordings or discarding unsav
  await expect(page.locator('.performance-text')).toContainText('Hazel shared phone');
  await expect(page.locator('.take-card')).toHaveCount(0);
  await page.getByRole('button',{name:'● Record',exact:true}).click();
- await expect(page.locator('.recording-state')).toContainText('0:01');
+ await expect(page.locator('.recording-state')).toContainText('0:01',{timeout:10000});
  await page.getByRole('button',{name:'■ Stop recording'}).click();
  await page.getByRole('button',{name:'Save take',exact:true}).click();
  await expect(page.locator('.take-card')).toHaveCount(1);

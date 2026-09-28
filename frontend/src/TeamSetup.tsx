@@ -1,0 +1,10 @@
+import {useEffect,useState} from 'react';
+import {request,type Named} from './api';
+export type Team={id:string;name:string;actor_ids:string[]};
+export function TeamSetup({actors,onStart,onBack}:{actors:Named[];onStart:(team:Team)=>void;onBack:()=>void}){
+ const [teams,setTeams]=useState<Team[]>([]);const [id,setID]=useState('');const [name,setName]=useState('');const [members,setMembers]=useState<string[]>([]);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+ useEffect(()=>{request<Team[]>('/api/teams').then(setTeams).catch(e=>setError(e.message));},[]);
+ function choose(value:string){setID(value);const t=teams.find(t=>t.id===value);setName(t?.name||'');setMembers(t?.actor_ids||[]);}
+ async function start(){setBusy(true);setError('');try{const team=await request<Team>(id?`/api/teams/${id}`:'/api/teams',id?'PUT':'POST',{name,actor_ids:members});onStart(team);}catch(e){setError(e instanceof Error?e.message:'Could not save the team.');}finally{setBusy(false);}}
+ return <div className="review-studio"><button className="secondary" disabled={busy} onClick={onBack}>← Individual recording</button><h1>Record together</h1><p>Choose two or more actors. Follow their lines in script order on this device.</p>{error&&<p role="alert" className="banner error">{error}</p>}<fieldset disabled={busy}><label>Saved team<select value={id} onChange={e=>choose(e.target.value)}><option value="">Create a new team</option>{teams.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Team name<input value={name} maxLength={120} onChange={e=>setName(e.target.value)}/></label><div className="team-members">{actors.map(a=><label key={a.id}><input type="checkbox" checked={members.includes(a.id)} onChange={e=>setMembers(m=>e.target.checked?[...m,a.id]:m.filter(id=>id!==a.id))}/>{a.name}</label>)}</div><button disabled={busy||members.length<2||!name.trim()} onClick={()=>void start()}>Save team and record</button></fieldset><p className="hint">For Any actor roles, choose the performer from the team before recording. Each take is saved under that actor.</p></div>;
+}

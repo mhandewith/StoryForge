@@ -21,7 +21,7 @@ test('an actor records, previews, saves multiple takes and replays history',asyn
  await expect(page.locator('.performance-direction')).toContainText('Start quietly');
  await page.getByRole('button',{name:'● Record',exact:true}).click();
  await expect(page.getByRole('status')).toContainText('Recording');
- await expect(page.getByRole('status')).toContainText('0:01');
+ await expect(page.getByRole('status')).toContainText('0:01',{timeout:10000});
  await page.getByRole('button',{name:'■ Stop recording'}).click();
  await expect(page.getByRole('button',{name:'Save take',exact:true})).toBeVisible();
  expect(await (await context.request.get('/api/actor/takes')).json()).toHaveLength(0);
@@ -39,7 +39,7 @@ test('an actor records, previews, saves multiple takes and replays history',asyn
  await page.getByRole('button',{name:'Save take',exact:true}).click();
  await expect(page.locator('.take-card')).toHaveCount(1);
  await page.getByRole('button',{name:'● Record another take'}).click();
- await expect(page.getByRole('status')).toContainText('0:01');
+ await expect(page.getByRole('status')).toContainText('0:01',{timeout:10000});
  await page.getByRole('button',{name:'■ Stop recording'}).click();
  await page.getByRole('button',{name:'Save take',exact:true}).click();
  await expect(page.locator('.take-card')).toHaveCount(2);

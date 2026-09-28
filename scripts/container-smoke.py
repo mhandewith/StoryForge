@@ -2,6 +2,7 @@
 import json
 import io
 import wave
+import zipfile
 import hashlib
 import os
 import secrets
@@ -409,11 +410,36 @@ def voicing_checks():
     assert not any(s['id']==scene['id'] for s in api('/api/actor/workspace',email='open-guest@example.test')['scenes'])
     audio_request(preview['url'],expected=404,email='open-guest@example.test')
     audio_request('/api/actor/events/'+lines[0]['id']+'/takes?revision=1',raw,'POST',403,email='open-guest@example.test',extra={'Content-Type':'audio/wav','X-Upload-ID':secrets.token_hex(16)})
+    # Ordered export chooses matching converted audio, then the current raw take.
+    export_calls=fake_eleven()['calls']
+    export_path='/api/projects/'+p['id']+'/export'
+    audio_request(export_path,expected=403,email='conversion@example.test')
+    def read_export():
+        archive=zipfile.ZipFile(io.BytesIO(audio_request(export_path)))
+        manifest=json.loads(archive.read('manifest.json'))
+        files=[l['file'] for l in manifest['lines'] if l['file']]
+        assert files==sorted(files) and all('..' not in f and not f.startswith('/') for f in files)
+        assert all('Source' not in l and 'source' not in l for l in manifest['lines'])
+        return archive,manifest
+    archive,manifest=read_export();assert all(l['kind']=='converted' for l in manifest['lines'])
+    current=upload(lines[0]);archive,manifest=read_export()
+    exported=next(l for l in manifest['lines'] if l['event_id']==lines[0]['id'])
+    assert exported['kind']=='raw' and exported['take_id']==current['id'] and archive.read(exported['file'])==raw
+    silent=api('/api/events',{'project_id':p['id'],'scene_id':scene['id'],'character_id':character,'text':'Not recorded yet.','direction':'','position':3,'start_ms':0},expected=201)
+    archive,manifest=read_export();assert next(l for l in manifest['lines'] if l['event_id']==silent['id'])['kind']=='missing'
+    assert fake_eleven()['calls']==export_calls, 'Export must never call ElevenLabs'
+    api('/api/teams',expected=403,email='conversion@example.test')
+    api('/api/teams',{'name':'Forbidden','actor_ids':[actor['id'],guest['id']]},expected=403,email='conversion@example.test')
+    api('/api/teams',{'name':'Invalid','actor_ids':[actor['id']]},expected=400)
+    team=api('/api/teams',{'name':'Family test team','actor_ids':[actor['id'],guest['id']]},expected=200)
+    assert any(t['id']==team['id'] and len(t['actor_ids'])==2 for t in api('/api/teams'))
+    api('/api/teams/'+team['id'],{'name':'Family renamed','actor_ids':[actor['id'],guest['id']]},'PUT')
     print('Voicing queue, open roles, cross-actor preference, private raw audio and restart recovery passed.')
 
 
 def restart():
     before = api("/api/workspace")
+    teams_before=api('/api/teams')
     takes_before=api('/api/actor/takes')
     audio_before={t['id']:hashlib.sha256(audio_request('/api/actor/takes/'+t['id']+'/audio',email='admin@example.test')).hexdigest() for t in takes_before}
     docker("stop", APP)
@@ -422,6 +448,7 @@ def restart():
     docker("restart", DB)
     start_app()  # reruns migrations without recreating or duplicating data
     assert api("/api/workspace") == before, "Records changed after restart"
+    assert api('/api/teams')==teams_before, 'Teams changed after restart'
     assert api('/api/actor/takes')==takes_before
     assert {t['id']:hashlib.sha256(audio_request('/api/actor/takes/'+t['id']+'/audio',email='admin@example.test')).hexdigest() for t in takes_before}==audio_before
     docker("stop", DB)

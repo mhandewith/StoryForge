@@ -26,7 +26,7 @@ test('admin selects voices and converts a scene; actors can listen but cannot re
  await page.goto('/');await page.getByLabel('Current project').selectOption(project.id);
  await page.getByRole('button',{name:'Cast & characters'}).click();
  for(const c of characters){await page.getByLabel(`Target voice for ${c.name}`,{exact:true}).selectOption(c.name==='Owl'?'storyforge:audio-isolation:v1':'voice-'+c.name.toLowerCase());await page.getByRole('button',{name:`Save target voice for ${c.name}`,exact:true}).click();await expect(page.getByRole('button',{name:`Save target voice for ${c.name}`,exact:true})).toBeDisabled();}
- await page.getByRole('button',{name:'Refresh voices for Wolf',exact:true}).click();
+ await page.getByRole('button',{name:'Refresh Voices',exact:true}).click();
  await expect(page.getByLabel('Target voice for Wolf',{exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Scenes & script'}).click();
  await expect(page.getByRole('button',{name:'Voice scene',exact:true})).toBeEnabled();
@@ -60,6 +60,22 @@ test('admin selects voices and converts a scene; actors can listen but cannot re
  expect(await isolated.evaluate((el:HTMLAudioElement)=>el.duration)).toBeGreaterThan(.9);
  await isolated.evaluate((el:HTMLAudioElement)=>el.pause());
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:'test-results/voicing-admin-mobile.png',fullPage:true});
+ await page.getByRole('button',{name:'Review takes',exact:true}).click();
+ await page.getByLabel('Project',{exact:true}).selectOption(project.id);
+ await expect(page.getByRole('button',{name:'Process line 1',exact:true})).toBeDisabled();
+ await expect(page.getByLabel('Converted line 1',{exact:true})).toBeVisible();
+ await page.getByLabel('Take for line 1',{exact:true}).selectOption(wolfTakes[1]);
+ await page.getByRole('button',{name:'Make selected take preferred for line 1',exact:true}).click();
+ await expect(page.getByText('Changed since processing — needs updating',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Process line 1',exact:true})).toBeEnabled();
+ page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Process line 1',exact:true}).click();
+ await expect(page.getByLabel('ElevenLabs scene')).toContainText('Line conversion complete',{timeout:60000});
+ await expect(page.getByRole('button',{name:'Process line 1',exact:true})).toBeDisabled();
+ const downloadEvent=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export project audio',exact:true}).click();
+ const download=await downloadEvent;expect(download.suggestedFilename()).toBe('Voice-changer-browser-story-audio.zip');expect(await download.failure()).toBeNull();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
+ await page.screenshot({path:'test-results/review-takes-mobile.png',fullPage:true});
  const context=await browser.newContext({baseURL:'http://127.0.0.1:18088',extraHTTPHeaders:{Authorization:`Bearer ${process.env.STORYFORGE_DEV_AUTH_TOKEN}`,'X-StoryForge-Dev-Email':'voice-browser@example.test'}});
  const actorPage=await context.newPage();await actorPage.goto('/');await actorPage.getByRole('button',{name:/A voiced scene/}).click();
  await expect(actorPage.getByLabel('Take for line 1',{exact:true})).toHaveCount(0);
