@@ -69,8 +69,17 @@ test('admin selects voices and converts a scene; actors can listen but cannot re
  await expect(page.getByText('Changed since processing — needs updating',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Process line 1',exact:true})).toBeEnabled();
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Process line 1',exact:true}).click();
+ await expect.poll(async()=>{
+  const status=await (await request.get(statusPath)).json();
+  return status.run?.state==='complete'&&status.conversions.some((c:{take_id:string})=>c.take_id===wolfTakes[1]);
+ },{timeout:60000}).toBeTruthy();
  await expect(page.getByLabel('ElevenLabs scene')).toContainText('Line conversion complete',{timeout:60000});
+ await expect(page.getByText('Up to date · Latest converted line',{exact:true})).toHaveCount(2);
  await expect(page.getByRole('button',{name:'Process line 1',exact:true})).toBeDisabled();
+ const reviewed=page.getByLabel('Converted line 1',{exact:true});
+ await reviewed.evaluate((el:HTMLAudioElement)=>el.play());
+ await expect.poll(()=>reviewed.evaluate((el:HTMLAudioElement)=>el.currentTime)).toBeGreaterThan(0);
+ await reviewed.evaluate((el:HTMLAudioElement)=>el.pause());
  const downloadEvent=page.waitForEvent('download');
  await page.getByRole('button',{name:'Export project audio',exact:true}).click();
  const download=await downloadEvent;expect(download.suggestedFilename()).toBe('Voice-changer-browser-story-audio.zip');expect(await download.failure()).toBeNull();
