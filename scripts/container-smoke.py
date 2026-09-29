@@ -434,6 +434,18 @@ def voicing_checks():
         assert all('Source' not in l and 'source' not in l for l in manifest['lines'])
         return archive,manifest
     archive,manifest=read_export();assert all(l['kind']=='converted' for l in manifest['lines'])
+    production_path='/api/scenes/'+scene['id']+'/production-export'
+    audio_request(production_path,expected=403,email='conversion@example.test')
+    production=zipfile.ZipFile(io.BytesIO(audio_request(production_path,email='admin@example.test')))
+    mixed=production.read(next(n for n in production.namelist() if n.endswith('_Mixed.wav')))
+    with wave.open(io.BytesIO(mixed),'rb') as output:
+        assert output.getnchannels()==1 and output.getframerate()==24000 and output.getnframes()>0
+    script=production.read(next(n for n in production.namelist() if n.endswith('_Script.txt'))).decode()
+    subtitles=production.read(next(n for n in production.namelist() if n.endswith('_Subtitles.srt'))).decode()
+    assert 'Hello owl.' in script and 'Hello wolf.' in script
+    assert 'Hello owl.' in subtitles and 'Hello wolf.' in subtitles and '-->' in subtitles
+    timeline=json.loads(production.read(next(n for n in production.namelist() if n.endswith('_Timeline.json'))))
+    assert len(timeline['lines'])==2
     api(assignment,{'actor_id':actor['id']},'PUT')
     current=upload(lines[0])
     api(assignment,{'actor_id':guest['id']},'PUT')

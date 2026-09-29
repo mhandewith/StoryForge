@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -80,13 +81,26 @@ func (a *API) exportSceneProduction(w http.ResponseWriter, r *http.Request) {
 		a.failure(w, err)
 		return
 	}
-	script, _ := z.Create(prefix + "_Script.txt")
-	subs, _ := z.Create(prefix + "_Subtitles.srt")
+	var script, subs strings.Builder
 	for i, l := range lines {
-		fmt.Fprintf(script, "[%s – %s] %s: %s\n", srtTime(l.StartMS), srtTime(l.EndMS), l.Character, l.Text)
-		fmt.Fprintf(subs, "%d\n%s --> %s\n%s: %s\n\n", i+1, srtTime(l.StartMS), srtTime(l.EndMS), l.Character, l.Text)
+		fmt.Fprintf(&script, "[%s – %s] %s: %s\n", srtTime(l.StartMS), srtTime(l.EndMS), l.Character, l.Text)
+		fmt.Fprintf(&subs, "%d\n%s --> %s\n%s: %s\n\n", i+1, srtTime(l.StartMS), srtTime(l.EndMS), l.Character, l.Text)
 	}
-	timeline, _ := z.Create(prefix + "_Timeline.json")
+	for _, entry := range []struct{ name, text string }{{prefix + "_Script.txt", script.String()}, {prefix + "_Subtitles.srt", subs.String()}} {
+		out, e := z.Create(entry.name)
+		if e == nil {
+			_, e = io.WriteString(out, entry.text)
+		}
+		if e != nil {
+			a.failure(w, e)
+			return
+		}
+	}
+	timeline, err := z.Create(prefix + "_Timeline.json")
+	if err != nil {
+		a.failure(w, err)
+		return
+	}
 	transitions := []map[string]any{}
 	rows, _ := a.DB.Query(ctx, "SELECT predecessor,successor,offset_ms FROM dialogue_transitions WHERE scene_id=$1", id)
 	if rows != nil {

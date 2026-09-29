@@ -208,7 +208,13 @@ func (a *API) renderScene(w http.ResponseWriter, r *http.Request) {
 	for _, part := range parts[:in.Part] {
 		start += len(part)
 	}
-	lines = parts[in.Part]
+	lines = append([]previewLine(nil), parts[in.Part]...)
+	// Each listening part starts at zero, not at its position in the full scene.
+	origin := lines[0].StartMS
+	for i := range lines {
+		lines[i].StartMS -= origin
+		lines[i].EndMS -= origin
+	}
 	key := previewKey(lines)
 	dir := filepath.Join(a.RecordingsDir, "scene-previews")
 	file := filepath.Join(dir, id+"-"+key+".mp3")
@@ -380,6 +386,9 @@ func (a *API) sceneAudio(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) compileScene(ctx context.Context, dir, destination string, lines []previewLine) error {
+	if len(lines) == 0 {
+		return errors.New("no dialogue to mix")
+	}
 	tmp, err := os.MkdirTemp(dir, ".render-")
 	if err != nil {
 		return err
@@ -402,9 +411,14 @@ func (a *API) compileScene(ctx context.Context, dir, destination string, lines [
 			}
 		}
 		args = append(args, "-i", source)
-		filters = append(filters, fmt.Sprintf("[%d:a]aformat=sample_rates=24000:channel_layouts=mono,adelay=%d|%d[a%d]", i, line.StartMS, line.StartMS, i))
+		// Focused previews can start partway through an earlier recording.
+		trim, delay := 0, line.StartMS
+		if delay < 0 {
+			trim, delay = -delay, 0
+		}
+		filters = append(filters, fmt.Sprintf("[%d:a]aformat=sample_rates=24000:channel_layouts=mono,atrim=start=%.3f,asetpts=PTS-STARTPTS,adelay=%d[a%d]", i, float64(trim)/1000, delay, i))
 	}
-	output := filepath.Join(tmp, "scene.mp3")
+	output := filepath.Join(tmp, "scene"+filepath.Ext(destination))
 	inputs := ""
 	for i := range lines {
 		inputs += fmt.Sprintf("[a%d]", i)
@@ -416,6 +430,7 @@ func (a *API) compileScene(ctx context.Context, dir, destination string, lines [
 	} else {
 		args = append(args, "-c:a", "libmp3lame", "-b:a", "96k")
 	}
+	args = append(args, "-ar", "24000", "-ac", "1", output)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	if err = cmd.Run(); err != nil {
 		return fmt.Errorf("encode scene: %w", err)
