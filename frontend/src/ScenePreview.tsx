@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {request} from './api';
+import {ExportSceneProduction} from './ExportAudio';
 
 type Preview={url:string;recorded_lines:number;converted_lines:number;synthetic_lines:number;part:number;parts:number;start_line:number;end_line:number;snapshot:string};
 export function ScenePreview({sceneID,version,disabled=false}:{sceneID:string;version:string;disabled?:boolean}) {
@@ -35,5 +36,6 @@ export function ScenePreview({sceneID,version,disabled=false}:{sceneID:string;ve
    {!disabled&&<audio controls preload="metadata" src={preview.url} aria-label={preview.parts>1?`Play scene part ${preview.part+1}`:'Play whole scene'} onPlay={e=>{const current=e.currentTarget;document.querySelectorAll('audio').forEach(a=>{if(a!==current)a.pause();});}}/>}
   </div>)}
   {error&&<p role="alert" className="banner error">{error}</p>}
+  <ExportSceneProduction sceneID={sceneID}/>
  </section>;
 }

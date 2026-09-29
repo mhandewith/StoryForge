@@ -8,3 +8,8 @@ export function ExportAudio({projectID}:{projectID:string}){
  }catch(e){setError(e instanceof Error?e.message:'Unable to export.');}finally{setBusy(false);}}
  return <div className="export-audio"><button className="secondary" disabled={!projectID||busy} onClick={()=>void download()}>{busy?'Preparing audio…':'Export project audio'}</button>{error&&<p role="alert" className="banner error">{error}</p>}</div>;
 }
+export function ExportSceneProduction({sceneID}:{sceneID:string}){
+ const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+ async function download(){setBusy(true);setError('');try{const response=await fetch(`/api/scenes/${sceneID}/production-export`);if(!response.ok){const d=await response.json().catch(()=>({error:'Export failed.'}));throw new Error(d.error||'Export failed.');}const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download='scene-production.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(e){setError(e instanceof Error?e.message:'Unable to export.');}finally{setBusy(false);}}
+ return <div className="export-audio"><button className="secondary" disabled={!sceneID||busy} onClick={()=>void download()}>{busy?'Preparing production package…':'Export scene production package'}</button>{error&&<p role="alert" className="banner error">{error}</p>}</div>
+}

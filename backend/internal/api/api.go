@@ -75,6 +75,11 @@ func (a *API) Register(mux *http.ServeMux) {
 	a.registerVoicing(mux)
 	mux.HandleFunc("GET /api/workspace", a.workspace)
 	mux.HandleFunc("GET /api/projects/{id}/export", a.exportProject)
+	mux.HandleFunc("GET /api/scenes/{id}/production-export", a.exportSceneProduction)
+	mux.HandleFunc("POST /api/scenes/{id}/groups", a.createDialogueGroup)
+	mux.HandleFunc("PUT /api/groups/{id}", a.updateDialogueGroup)
+	mux.HandleFunc("DELETE /api/groups/{id}", a.dissolveDialogueGroup)
+	mux.HandleFunc("PUT /api/scenes/{id}/transitions", a.saveTransition)
 	mux.HandleFunc("GET /api/teams", a.teams)
 	mux.HandleFunc("POST /api/teams", a.saveTeam)
 	mux.HandleFunc("PUT /api/teams/{id}", a.saveTeam)
@@ -147,7 +152,9 @@ func (a *API) workspace(w http.ResponseWriter, r *http.Request) {
  'scenes', COALESCE((SELECT jsonb_agg(s ORDER BY s.position,s.id) FROM active_scenes s),'[]'::jsonb),
  'characters', COALESCE((SELECT jsonb_agg(c ORDER BY c.name,c.id) FROM active_characters c),'[]'::jsonb),
  'assignments', COALESCE((SELECT jsonb_agg(a ORDER BY a.character_id) FROM active_assignments a),'[]'::jsonb),
- 'events', COALESCE((SELECT jsonb_agg(e ORDER BY e.position,e.id) FROM active_events e),'[]'::jsonb))`)
+ 'events', COALESCE((SELECT jsonb_agg(e ORDER BY e.position,e.id) FROM active_events e),'[]'::jsonb),
+ 'dialogue_groups', COALESCE((SELECT jsonb_agg(jsonb_build_object('id',g.id,'scene_id',g.scene_id,'members',(SELECT jsonb_agg(jsonb_build_object('event_id',m.event_id,'offset_ms',m.offset_ms)) FROM dialogue_group_members m WHERE m.group_id=g.id))) FROM dialogue_groups g),'[]'::jsonb),
+ 'dialogue_transitions', COALESCE((SELECT jsonb_agg(t) FROM dialogue_transitions t),'[]'::jsonb))`)
 }
 
 type named struct {

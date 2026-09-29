@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +32,14 @@ type previewLine struct {
 	Character string `json:"character"`
 	Text      string `json:"text"`
 	Revision  int    `json:"revision"`
+	Position  int    `json:"position"`
 	Source    string `json:"source"`
 	Duration  int    `json:"duration_ms"`
 	Converted bool   `json:"converted"`
+	GroupID   string `json:"group_id,omitempty"`
+	OffsetMS  int    `json:"offset_ms,omitempty"`
+	StartMS   int    `json:"start_ms,omitempty"`
+	EndMS     int    `json:"end_ms,omitempty"`
 }
 
 // One SQL statement captures ordering, assignment and chosen takes together.
@@ -44,8 +49,9 @@ func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, er
 	u := identity.Current(ctx)
 	var raw []byte
 	err := a.DB.QueryRow(ctx, `SELECT COALESCE((SELECT jsonb_agg(x ORDER BY x.position,x.id) FROM (
- SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(converted.audio_key,t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms,converted.audio_key IS NOT NULL AS converted
+	 SELECT e.id,c.name AS character,e.text,e.revision,e.position,COALESCE(converted.audio_key,t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms,converted.audio_key IS NOT NULL AS converted,COALESCE(gm.group_id::text,'') AS group_id,COALESCE(gm.offset_ms,0) AS offset_ms
  FROM active_events e JOIN active_characters c ON c.id=e.character_id
+	 LEFT JOIN dialogue_group_members gm ON gm.event_id=e.id
  LEFT JOIN LATERAL (SELECT tk.id,asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
  WHERE tk.event_id=e.id AND tk.revision=e.revision
 	 ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
@@ -58,13 +64,73 @@ func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, er
 		return nil, err
 	}
 	var lines []previewLine
-	err = json.Unmarshal(raw, &lines)
-	return lines, err
+	if err = json.Unmarshal(raw, &lines); err != nil {
+		return nil, err
+	}
+	return a.arrangeLines(ctx, scene, lines)
+}
+
+func (a *API) arrangeLines(ctx context.Context, scene string, lines []previewLine) ([]previewLine, error) {
+	byGroup := map[string][]previewLine{}
+	elements := []timelineElement{}
+	seen := map[string]bool{}
+	for _, l := range lines {
+		if l.Duration <= 0 {
+			l.Duration = len(strings.Fields(l.Text))*600 + 2000
+		}
+		if l.GroupID != "" {
+			byGroup[l.GroupID] = append(byGroup[l.GroupID], l)
+			continue
+		}
+		elements = append(elements, timelineElement{Key: "line:" + l.ID, Position: l.Position, Lines: []timelineLine{{ID: l.ID, Duration: l.Duration}}})
+	}
+	for group, members := range byGroup {
+		min := 2147483647
+		groupLines := []timelineLine{}
+		for _, l := range members {
+			if l.Position < min {
+				min = l.Position
+			}
+			groupLines = append(groupLines, timelineLine{ID: l.ID, Duration: l.Duration, Start: l.OffsetMS})
+		}
+		elements = append(elements, timelineElement{Key: "group:" + group, Position: min, Lines: groupLines})
+		seen[group] = true
+	}
+	_ = seen
+	transitions := map[string]int{}
+	rows, err := a.DB.Query(ctx, "SELECT predecessor,successor,offset_ms FROM dialogue_transitions WHERE scene_id=$1", scene)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p, s string
+		var off int
+		if err = rows.Scan(&p, &s, &off); err != nil {
+			return nil, err
+		}
+		transitions[p+"\x00"+s] = off
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	timed := calculateTimeline(elements, transitions)
+	index := map[string]timelineLine{}
+	for _, v := range timed {
+		index[v.ID] = v
+	}
+	for i := range lines {
+		v := index[lines[i].ID]
+		lines[i].StartMS = v.Start
+		lines[i].EndMS = v.End
+	}
+	sort.SliceStable(lines, func(i, j int) bool { return lines[i].StartMS < lines[j].StartMS })
+	return lines, nil
 }
 
 func previewKey(lines []previewLine) string {
 	b, _ := json.Marshal(lines)
-	sum := sha256.Sum256(append([]byte("scene-v1-en-us-165-gap300:"), b...))
+	sum := sha256.Sum256(append([]byte("scene-v2-timeline:"), b...))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -223,14 +289,10 @@ func (a *API) compileScene(ctx context.Context, dir, destination string, lines [
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	pcm, err := os.Create(filepath.Join(tmp, "scene.pcm"))
-	if err != nil {
-		return err
-	}
-	defer pcm.Close()
-	var total int64
+	args := []string{"-nostdin", "-v", "error", "-y"}
+	filters := []string{}
 	for i, line := range lines {
-		source := filepath.Join(tmp, "speech.wav")
+		source := filepath.Join(tmp, fmt.Sprintf("speech-%d.wav", i))
 		if line.Source != "" {
 			if filepath.Base(line.Source) != line.Source {
 				return errors.New("invalid source key")
@@ -243,50 +305,22 @@ func (a *API) compileScene(ctx context.Context, dir, destination string, lines [
 				return fmt.Errorf("speech synthesis: %w", err)
 			}
 		}
-		segment := filepath.Join(tmp, "line.pcm")
-		cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file,pipe", "-i", source, "-vn", "-fs", "14448000", "-ac", "1", "-ar", "24000", "-f", "s16le", segment)
-		if err = cmd.Run(); err != nil {
-			return fmt.Errorf("normalize audio: %w", err)
-		}
-		info, err := os.Stat(segment)
-		if err != nil {
-			return err
-		}
-		if info.Size() >= 14448000 {
-			return errPreviewLimit
-		}
-		f, err := os.Open(segment)
-		if err != nil {
-			return err
-		}
-		n, err := io.Copy(pcm, io.LimitReader(f, maxScenePCM-total+1))
-		f.Close()
-		total += n
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return errors.New("empty audio")
-		}
-		if total > maxScenePCM {
-			return errPreviewLimit
-		}
-		if i < len(lines)-1 {
-			silence := make([]byte, 14400)
-			if _, err = pcm.Write(silence); err != nil {
-				return err
-			}
-			total += int64(len(silence))
-		}
-	}
-	if total > maxScenePCM {
-		return errPreviewLimit
-	}
-	if err = pcm.Close(); err != nil {
-		return err
+		args = append(args, "-i", source)
+		filters = append(filters, fmt.Sprintf("[%d:a]aformat=sample_rates=24000:channel_layouts=mono,adelay=%d|%d[a%d]", i, line.StartMS, line.StartMS, i))
 	}
 	output := filepath.Join(tmp, "scene.mp3")
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", filepath.Join(tmp, "scene.pcm"), "-c:a", "libmp3lame", "-b:a", "96k", output)
+	inputs := ""
+	for i := range lines {
+		inputs += fmt.Sprintf("[a%d]", i)
+	}
+	filters = append(filters, fmt.Sprintf("%samix=inputs=%d:normalize=0:dropout_transition=0", inputs, len(lines)))
+	args = append(args, "-filter_complex", strings.Join(filters, ";"), "-t", "1200")
+	if filepath.Ext(destination) == ".wav" {
+		args = append(args, "-c:a", "pcm_s16le")
+	} else {
+		args = append(args, "-c:a", "libmp3lame", "-b:a", "96k")
+	}
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	if err = cmd.Run(); err != nil {
 		return fmt.Errorf("encode scene: %w", err)
 	}

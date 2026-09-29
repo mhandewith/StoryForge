@@ -50,3 +50,15 @@ func TestPreviewInvalidation(t *testing.T) {
 		t.Fatal("unstable character voice")
 	}
 }
+
+func TestCalculateTimelineGroupsAndOverlap(t *testing.T) {
+	elements := []timelineElement{
+		{Key: "line:a", Position: 1, Lines: []timelineLine{{ID: "a", Duration: 1000}}},
+		{Key: "group:g", Position: 2, Lines: []timelineLine{{ID: "b", Duration: 800}, {ID: "c", Duration: 500, Start: 400}}},
+		{Key: "line:d", Position: 3, Lines: []timelineLine{{ID: "d", Duration: 200}}},
+	}
+	got := calculateTimeline(elements, map[string]int{"line:a\x00group:g": -250})
+	if got[0].Start != 0 || got[1].Start != 750 || got[2].Start != 1150 || got[3].Start != 1650 {
+		t.Fatalf("unexpected positions: %#v", got)
+	}
+}
