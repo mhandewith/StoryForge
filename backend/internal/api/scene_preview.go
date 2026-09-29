@@ -249,6 +249,102 @@ func (a *API) renderScene(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"url": "/api/actor/scenes/" + id + "/preview/" + key, "recorded_lines": recorded, "converted_lines": converted, "synthetic_lines": len(lines) - recorded, "part": in.Part, "parts": len(parts), "start_line": start, "end_line": start + len(lines) - 1, "snapshot": snapshot})
 }
 
+// renderTimelinePreview uses the same calculated positions and mixer as a full
+// scene, but shifts a focused time window to zero for immediate auditioning.
+func (a *API) renderTimelinePreview(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		GroupID     string `json:"group_id"`
+		Predecessor string `json:"predecessor"`
+		Successor   string `json:"successor"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	id := r.PathValue("id")
+	if !validID(id) {
+		problem(w, 400, "Choose a scene.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 80*time.Second)
+	defer cancel()
+	lines, err := a.previewLines(ctx, id)
+	if err != nil {
+		a.failure(w, err)
+		return
+	}
+	start, end := -1, -1
+	if in.GroupID != "" {
+		for _, l := range lines {
+			if l.GroupID == in.GroupID {
+				if start < 0 || l.StartMS < start {
+					start = l.StartMS
+				}
+				if l.EndMS > end {
+					end = l.EndMS
+				}
+			}
+		}
+	} else {
+		var previous, next *previewLine
+		for i := range lines {
+			key := "line:" + lines[i].ID
+			if key == in.Predecessor {
+				previous = &lines[i]
+			}
+			if key == in.Successor {
+				next = &lines[i]
+			}
+		}
+		if previous == nil || next == nil {
+			problem(w, 400, "Choose two available dialogue elements.")
+			return
+		}
+		start = previous.EndMS - 2000
+		if previous.EndMS-previous.StartMS < 3000 {
+			start = previous.StartMS
+		}
+		end = next.EndMS
+	}
+	if start < 0 || end <= start {
+		problem(w, 400, "That dialogue arrangement is unavailable.")
+		return
+	}
+	selected := []previewLine{}
+	for _, l := range lines {
+		if l.EndMS > start && l.StartMS < end {
+			l.StartMS -= start
+			l.EndMS -= start
+			selected = append(selected, l)
+		}
+	}
+	if len(selected) == 0 {
+		problem(w, 400, "No audio is available for this preview.")
+		return
+	}
+	key := previewKey(selected)
+	dir := filepath.Join(a.RecordingsDir, "scene-previews")
+	file := filepath.Join(dir, id+"-"+key+".mp3")
+	if !sceneRenderLock.TryLock() {
+		problem(w, 409, "Another scene is being generated. Try again shortly.")
+		return
+	}
+	defer sceneRenderLock.Unlock()
+	if err = os.MkdirAll(dir, 0750); err != nil {
+		a.failure(w, err)
+		return
+	}
+	if _, err = os.Stat(file); os.IsNotExist(err) {
+		if err = a.compileScene(ctx, dir, file, selected); err != nil {
+			a.failure(w, err)
+			return
+		}
+	} else if err != nil {
+		a.failure(w, err)
+		return
+	}
+	JSON(w, 200, map[string]string{"url": "/api/actor/scenes/" + id + "/preview/" + key})
+}
+
 func (a *API) sceneAudio(w http.ResponseWriter, r *http.Request) {
 	id, key := r.PathValue("id"), r.PathValue("key")
 	if !validID(id) || len(key) != 64 || strings.Trim(key, "0123456789abcdef") != "" || a.RecordingsDir == "" {
