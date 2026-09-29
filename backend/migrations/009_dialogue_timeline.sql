@@ -7,7 +7,7 @@ CREATE TABLE dialogue_groups (
 );
 CREATE TABLE dialogue_group_members (
  group_id uuid NOT NULL REFERENCES dialogue_groups(id) ON DELETE CASCADE,
- event_id uuid PRIMARY KEY REFERENCES script_events(id) ON DELETE CASCADE,
+ event_id uuid NOT NULL UNIQUE REFERENCES script_events(id) ON DELETE CASCADE,
  offset_ms integer NOT NULL DEFAULT 0 CHECK (offset_ms BETWEEN -300000 AND 300000),
  PRIMARY KEY(group_id,event_id)
 );
