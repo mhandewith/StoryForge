@@ -127,7 +127,11 @@ func (a *API) workVoiceRun(ctx context.Context, c *pgxpool.Conn, run, scene stri
 		if conversionErr != nil {
 			return a.failVoiceRun(ctx, c, run, job, conversionErr.Error())
 		}
-		_, err = c.Exec(ctx, `UPDATE voice_jobs SET state='complete',audio_key=$2,completed_at=now() WHERE id=$1`, job, key)
+		info, err := inspectAudio(ctx, filepath.Join(a.RecordingsDir, key))
+		if err != nil {
+			return a.failVoiceRun(ctx, c, run, job, "Converted audio duration could not be read. Credits may have been used; check before retrying.")
+		}
+		_, err = c.Exec(ctx, `UPDATE voice_jobs SET state='complete',audio_key=$2,duration_ms=$3,completed_at=now() WHERE id=$1`, job, key, info.Duration)
 		return err
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -141,14 +145,14 @@ func (a *API) workVoiceRun(ctx context.Context, c *pgxpool.Conn, run, scene stri
 		_, err = c.Exec(ctx, `UPDATE voice_runs SET state='complete',error='' WHERE id=$1`, run)
 		return err
 	}
-	rows, err := c.Query(ctx, `SELECT event_id::text,audio_key FROM voice_jobs WHERE run_id=$1 AND state='complete' ORDER BY position,id`, run)
+	rows, err := c.Query(ctx, `SELECT j.event_id::text,j.audio_key,j.position,COALESCE(j.duration_ms,a.duration_ms),COALESCE(g.group_id::text,''),COALESCE(g.offset_ms,0) FROM voice_jobs j JOIN takes t ON t.id=j.take_id JOIN audio_assets a ON a.id=t.asset_id LEFT JOIN dialogue_group_members g ON g.event_id=j.event_id WHERE j.run_id=$1 AND j.state='complete' ORDER BY j.position,j.id`, run)
 	if err != nil {
 		return err
 	}
 	lines := []previewLine{}
 	for rows.Next() {
 		var l previewLine
-		if err = rows.Scan(&l.ID, &l.Source); err != nil {
+		if err = rows.Scan(&l.ID, &l.Source, &l.Position, &l.Duration, &l.GroupID, &l.OffsetMS); err != nil {
 			break
 		}
 		lines = append(lines, l)
@@ -164,6 +168,10 @@ func (a *API) workVoiceRun(ctx context.Context, c *pgxpool.Conn, run, scene stri
 		return a.failVoiceRun(ctx, c, run, "", "No converted lines were available to compile.")
 	}
 	key := "voiced-scene-" + run + ".mp3"
+	lines, err = a.arrangeLines(ctx, scene, lines)
+	if err != nil {
+		return err
+	}
 	renderCtx, cancel := context.WithTimeout(ctx, 80*time.Second)
 	err = a.compileScene(renderCtx, a.RecordingsDir, filepath.Join(a.RecordingsDir, key), lines)
 	cancel()
@@ -223,9 +231,9 @@ func (a *API) convertVoiceLine(ctx context.Context, voice, source, key string) e
 		if info.Duration < 4850 || info.Duration > 5150 {
 			return errors.New("Isolation changed the padded recording's duration. Stopped before trimming to avoid clipping speech. Check ElevenLabs before retrying; credits may have been used.")
 		}
-		trimmed := filepath.Join(dir, "trimmed.mp3")
+		trimmed := filepath.Join(dir, "trimmed.wav")
 		filter := fmt.Sprintf("atrim=start=%.3f:end=%.3f,asetpts=PTS-STARTPTS", float64(paddingMS)/1000, float64(paddingMS+originalMS)/1000)
-		cmd = exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", output, "-af", filter, "-c:a", "libmp3lame", "-b:a", "128k", trimmed)
+		cmd = exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", output, "-af", filter, "-c:a", "pcm_s16le", trimmed)
 		if err = cmd.Run(); err != nil {
 			return errors.New("Could not trim the isolated recording. Check storage before retrying; credits may have been used.")
 		}
@@ -234,6 +242,14 @@ func (a *API) convertVoiceLine(ctx context.Context, voice, source, key string) e
 		}
 		output = trimmed
 	}
+	trimmed := filepath.Join(dir, "speech.mp3")
+	if err = trimProcessedAudio(ctx, output, trimmed); err != nil {
+		return errors.New("Could not trim processed audio. Check storage before retrying; credits may have been used.")
+	}
+	if _, err = inspectAudio(ctx, trimmed); err != nil {
+		return errors.New("Trimmed audio failed validation. Credits may have been used.")
+	}
+	output = trimmed
 	if err = os.Rename(output, filepath.Join(a.RecordingsDir, key)); err != nil {
 		return errors.New("Converted audio could not be installed. Check storage; the request may have used credits.")
 	}

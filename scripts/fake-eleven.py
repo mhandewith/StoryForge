@@ -5,6 +5,8 @@ import json
 import time
 import threading
 import wave
+import math
+import struct
 from email.parser import BytesParser
 from email.policy import default
 
@@ -13,7 +15,8 @@ state = {'calls': 0, 'isolations': 0, 'lists': 0, 'fail_next': False, 'delay': 0
 audio = io.BytesIO()
 with wave.open(audio, 'wb') as wav:
     wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
-    wav.writeframes(b'\x20\x00' * 16000)
+    # Provider output with dead air at both ends for processed-duration coverage.
+    wav.writeframes(b''.join(struct.pack('<h', int(2000*math.sin(2*math.pi*700*i/16000)) if 16000 <= i < 24000 else 0) for i in range(48000)))
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass

@@ -228,8 +228,9 @@ func (a *API) queueVoiceScene(w http.ResponseWriter, r *http.Request) {
 		for _, l := range lines {
 			key := ""
 			var completed *time.Time
+			var duration *int
 			if l.Event != in.Event {
-				err = tx.QueryRow(r.Context(), `SELECT audio_key,completed_at FROM voice_jobs WHERE take_id=$1 AND voice_id=$2 AND state='complete' ORDER BY completed_at DESC LIMIT 1`, l.Take, l.Voice).Scan(&key, &completed)
+				err = tx.QueryRow(r.Context(), `SELECT audio_key,completed_at,duration_ms FROM voice_jobs WHERE take_id=$1 AND voice_id=$2 AND state='complete' ORDER BY completed_at DESC LIMIT 1`, l.Take, l.Voice).Scan(&key, &completed, &duration)
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 					return err
 				}
@@ -244,7 +245,7 @@ func (a *API) queueVoiceScene(w http.ResponseWriter, r *http.Request) {
 			if key != "" {
 				state = "complete"
 			}
-			_, err = tx.Exec(r.Context(), `INSERT INTO voice_jobs(run_id,event_id,take_id,voice_id,position,source_key,state,audio_key,completed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, run, l.Event, l.Take, l.Voice, l.Position, l.Source, state, key, completed)
+			_, err = tx.Exec(r.Context(), `INSERT INTO voice_jobs(run_id,event_id,take_id,voice_id,position,source_key,state,audio_key,completed_at,duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, run, l.Event, l.Take, l.Voice, l.Position, l.Source, state, key, completed, duration)
 			if err != nil {
 				return err
 			}

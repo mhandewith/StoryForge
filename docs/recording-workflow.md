@@ -38,6 +38,15 @@ The button is also available in Review Takes.
 
 ## Export audio (administrator)
 
+New ElevenLabs voice conversions and isolation results automatically trim quiet
+audio from the beginning and end, keeping about 100 ms around the performance.
+Pauses within the line stay intact. Raw recordings are untouched. Very quiet or
+silent results are kept intact when no signal exceeds the conservative -50 dBFS
+threshold. Scene timing uses the processed file's duration.
+
+Existing conversions are unchanged; this applies when a new conversion finishes.
+Trimming itself runs locally and makes no additional ElevenLabs requests.
+
 **Export project audio** is available in the script workspace and Review Takes.
 It downloads a ZIP containing one file per recorded line, grouped in numbered
 scene folders. The scene and line numbers are zero-padded so names sort in script

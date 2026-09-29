@@ -446,6 +446,8 @@ def voicing_checks():
     assert 'Hello owl.' in subtitles and 'Hello wolf.' in subtitles and '-->' in subtitles
     timeline=json.loads(production.read(next(n for n in production.namelist() if n.endswith('_Timeline.json'))))
     assert len(timeline['lines'])==2
+    assert all(600 <= l['duration_ms'] <= 900 for l in timeline['lines']), 'Timeline must use trimmed conversion duration, including reused jobs'
+    assert timeline['lines'][1]['start_ms']==timeline['lines'][0]['end_ms'], 'Converted lines must play sequentially'
     api(assignment,{'actor_id':actor['id']},'PUT')
     current=upload(lines[0])
     api(assignment,{'actor_id':guest['id']},'PUT')

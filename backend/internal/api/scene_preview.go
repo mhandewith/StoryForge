@@ -49,13 +49,13 @@ func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, er
 	u := identity.Current(ctx)
 	var raw []byte
 	err := a.DB.QueryRow(ctx, `SELECT COALESCE((SELECT jsonb_agg(x ORDER BY x.position,x.id) FROM (
-	 SELECT e.id,c.name AS character,e.text,e.revision,e.position,COALESCE(converted.audio_key,t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms,converted.audio_key IS NOT NULL AS converted,COALESCE(gm.group_id::text,'') AS group_id,COALESCE(gm.offset_ms,0) AS offset_ms
+	 SELECT e.id,c.name AS character,e.text,e.revision,e.position,COALESCE(converted.audio_key,t.storage_key,'') AS source,COALESCE(converted.duration_ms,t.duration_ms,0) AS duration_ms,converted.audio_key IS NOT NULL AS converted,COALESCE(gm.group_id::text,'') AS group_id,COALESCE(gm.offset_ms,0) AS offset_ms
  FROM active_events e JOIN active_characters c ON c.id=e.character_id
 	 LEFT JOIN dialogue_group_members gm ON gm.event_id=e.id
  LEFT JOIN LATERAL (SELECT tk.id,asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
  WHERE tk.event_id=e.id AND tk.revision=e.revision
 	 ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
- LEFT JOIN LATERAL (SELECT j.audio_key FROM voice_jobs j WHERE j.event_id=e.id AND j.take_id=t.id AND j.voice_id=c.eleven_voice_id AND j.state='complete' AND j.audio_key<>'' ORDER BY j.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) converted ON true
+ LEFT JOIN LATERAL (SELECT j.audio_key,j.duration_ms FROM voice_jobs j WHERE j.event_id=e.id AND j.take_id=t.id AND j.voice_id=c.eleven_voice_id AND j.state='complete' AND j.audio_key<>'' ORDER BY j.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) converted ON true
  WHERE e.scene_id=s.id) x),'[]'::jsonb)
  FROM active_scenes s WHERE s.id=$1 AND ($2::boolean OR EXISTS(
  SELECT 1 FROM active_events e JOIN active_assignments ass ON ass.character_id=e.character_id
