@@ -62,6 +62,9 @@ test('admin selects voices and converts a scene; actors can listen but cannot re
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:'test-results/voicing-admin-mobile.png',fullPage:true});
  await page.getByRole('button',{name:'Review takes',exact:true}).click();
  await page.getByLabel('Project',{exact:true}).selectOption(project.id);
+ // An existing guest performance remains eligible after the role is reassigned.
+ expect((await request.put(`/api/assignments/${characters[0].id}`,{data:{actor_id:actor.id}})).ok()).toBeTruthy();
+ await page.getByRole('button',{name:'Reload',exact:true}).click();
  await expect(page.getByRole('button',{name:'Process line 1',exact:true})).toBeDisabled();
  await expect(page.getByLabel('Converted line 1',{exact:true})).toBeVisible();
  await page.getByLabel('Take for line 1',{exact:true}).selectOption(wolfTakes[1]);

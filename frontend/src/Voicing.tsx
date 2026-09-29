@@ -29,7 +29,7 @@ function TakeAudition({line,takes,disabled,onPrefer}:{line:Line;takes:AuditionTa
  const [selected,setSelected]=useState('');
  const take=takes.find(t=>t.id===selected)||takes.find(t=>t.id===line.take_id)||takes[0];
  if(!take)return <p>No recorded takes for this line yet.</p>;
- return <div className="take-audition"><label>Recorded takes<select aria-label={`Take for line ${line.position}`} value={take.id} disabled={disabled} onChange={e=>setSelected(e.target.value)}>{takes.map(t=><option key={t.id} value={t.id}>{t.actor_name} · Take {t.take_number} · {new Date(t.created_at).toLocaleString()}{t.id===line.take_id?' · Preferred for conversion':''}{t.stale?' · Earlier script version':!t.eligible?' · Actor no longer assigned':''}</option>)}</select></label>
+ return <div className="take-audition"><label>Recorded takes<select aria-label={`Take for line ${line.position}`} value={take.id} disabled={disabled} onChange={e=>setSelected(e.target.value)}>{takes.map(t=><option key={t.id} value={t.id}>{t.actor_name} · Take {t.take_number} · {new Date(t.created_at).toLocaleString()}{t.id===line.take_id?' · Preferred for conversion':''}{t.stale?' · Earlier script version':''}</option>)}</select></label>
  {!disabled&&<ConvertedPlayer key={take.id} src={`/api/actor/takes/${take.id}/audio`} label={`Play selected take for line ${line.position}`}/>}
  <button className="secondary" aria-label={`Make selected take preferred for line ${line.position}`} disabled={disabled||!take.eligible||take.id===line.take_id} onClick={()=>void onPrefer(take.id)}>{take.id===line.take_id?'Preferred for conversion':'Make preferred'}</button>
  <small>Choosing a take here only changes playback. Make it preferred to use it for conversion.</small>

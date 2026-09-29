@@ -5,8 +5,9 @@ scene preview**. Once ready, each player streams an MP3 assembled on the server.
 Choose **Update scene preview** after someone else saves a take. Local script or
 take changes clear the displayed preview so it can be regenerated.
 
-Each line uses the currently assigned actor's preferred take for the current line
-revision, or their latest current-revision take if none is preferred. If there is
+Each line uses its preferred take for the current line revision, or the latest
+current-revision take across all actors if none is preferred. Changing Played by
+does not discard or exclude existing performances or their conversions. If there is
 no matching take, offline eSpeak NG speaks the dialogue. When a successful ElevenLabs
 conversion or isolation matches the selected take and current target voice, the
 preview uses that audio instead of the raw take. Generate again after conversion

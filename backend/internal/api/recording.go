@@ -54,7 +54,7 @@ const takeSelect = `SELECT t.id,t.event_id,t.actor_id,t.revision,t.take_number,t
  a.duration_ms,a.mime_type,a.size_bytes,a.sha256,r.text,r.direction,r.character_id,
  c.name AS character_name,p.name AS project_name,s.name AS scene_name,
  t.revision<>e.revision AS stale,actor.name AS actor_name,
- (t.revision=e.revision AND EXISTS(SELECT 1 FROM active_assignments ass WHERE ass.character_id=e.character_id AND (ass.actor_id IS NULL OR ass.actor_id=t.actor_id))) AS eligible
+ (t.revision=e.revision) AS eligible
  FROM takes t JOIN audio_assets a ON a.id=t.asset_id
  JOIN script_event_revisions r ON r.event_id=t.event_id AND r.revision=t.revision
  JOIN active_events e ON e.id=t.event_id JOIN characters c ON c.id=r.character_id

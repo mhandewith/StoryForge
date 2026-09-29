@@ -73,8 +73,7 @@ func (a *API) exportProject(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.DB.Query(ctx, `SELECT s.name,s.position,e.position,e.id::text,c.name,COALESCE(t.actor_name,''),e.text,COALESCE(t.id::text,''),COALESCE(j.audio_key,t.storage_key,''),CASE WHEN j.audio_key IS NOT NULL THEN 'converted' WHEN t.id IS NOT NULL THEN 'raw' ELSE 'missing' END
  FROM active_events e JOIN active_scenes s ON s.id=e.scene_id JOIN active_characters c ON c.id=e.character_id
- LEFT JOIN active_assignments ass ON ass.character_id=c.id
- LEFT JOIN LATERAL (SELECT tk.id,asset.storage_key,actor.name AS actor_name FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id JOIN actors actor ON actor.id=tk.actor_id WHERE tk.event_id=e.id AND tk.revision=e.revision AND ass.character_id IS NOT NULL AND (ass.actor_id IS NULL OR tk.actor_id=ass.actor_id) ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1)t ON true
+ LEFT JOIN LATERAL (SELECT tk.id,asset.storage_key,actor.name AS actor_name FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id JOIN actors actor ON actor.id=tk.actor_id WHERE tk.event_id=e.id AND tk.revision=e.revision ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1)t ON true
  LEFT JOIN LATERAL (SELECT audio_key FROM voice_jobs WHERE event_id=e.id AND take_id=t.id AND voice_id=c.eleven_voice_id AND state='complete' AND audio_key<>'' ORDER BY completed_at DESC,created_at DESC,id DESC LIMIT 1)j ON true
  WHERE e.project_id=$1 ORDER BY s.position,s.id,e.position,e.id`, id)
 	if err != nil {

@@ -412,6 +412,18 @@ def voicing_checks():
     audio_request('/api/actor/events/'+lines[0]['id']+'/takes?revision=1',raw,'POST',403,email='open-guest@example.test',extra={'Content-Type':'audio/wav','X-Upload-ID':secrets.token_hex(16)})
     # Ordered export chooses matching converted audio, then the current raw take.
     export_calls=fake_eleven()['calls']
+    # Reassigning a role preserves its preferred performance and paid conversion.
+    before_reassignment=api(status_path)
+    api(assignment,{'actor_id':guest['id']},'PUT')
+    after_reassignment=api(status_path)
+    assert after_reassignment['snapshot_hash']==before_reassignment['snapshot_hash']
+    assert next(l for l in after_reassignment['lines'] if l['event_id']==lines[0]['id'])['take_id']==takes[0]['id']
+    assert next(t for t in api('/api/actor/takes') if t['id']==takes[0]['id'])['eligible']
+    reassigned=api('/api/actor/scenes/'+scene['id']+'/preview',{},'POST',email='open-guest@example.test')
+    assert reassigned['converted_lines']==2 and reassigned['synthetic_lines']==0
+    # Assignment changes still control who may upload and whose raw takes may be read.
+    audio_request('/api/actor/events/'+lines[0]['id']+'/takes?revision=1',raw,'POST',403,email='conversion@example.test',extra={'Content-Type':'audio/wav','X-Upload-ID':secrets.token_hex(16)})
+    audio_request('/api/actor/takes/'+takes[0]['id']+'/audio',expected=404,email='open-guest@example.test')
     export_path='/api/projects/'+p['id']+'/export'
     audio_request(export_path,expected=403,email='conversion@example.test')
     def read_export():
@@ -422,7 +434,12 @@ def voicing_checks():
         assert all('Source' not in l and 'source' not in l for l in manifest['lines'])
         return archive,manifest
     archive,manifest=read_export();assert all(l['kind']=='converted' for l in manifest['lines'])
-    current=upload(lines[0]);archive,manifest=read_export()
+    api(assignment,{'actor_id':actor['id']},'PUT')
+    current=upload(lines[0])
+    api(assignment,{'actor_id':guest['id']},'PUT')
+    raw_preview=api('/api/actor/scenes/'+scene['id']+'/preview',{},'POST',email='open-guest@example.test')
+    assert raw_preview['recorded_lines']==2 and raw_preview['converted_lines']==1 and raw_preview['synthetic_lines']==0
+    archive,manifest=read_export()
     exported=next(l for l in manifest['lines'] if l['event_id']==lines[0]['id'])
     assert exported['kind']=='raw' and exported['take_id']==current['id'] and archive.read(exported['file'])==raw
     silent=api('/api/events',{'project_id':p['id'],'scene_id':scene['id'],'character_id':character,'text':'Not recorded yet.','direction':'','position':3,'start_ms':0},expected=201)

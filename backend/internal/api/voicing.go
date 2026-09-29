@@ -36,9 +36,8 @@ func readVoiceInputs(ctx context.Context, q rowReader, scene string) ([]voiceInp
  SELECT e.id AS event_id,e.text,e.revision,e.position,c.name AS character,c.eleven_voice_id AS voice_id,
  COALESCE(t.id::text,'') AS take_id,COALESCE(t.storage_key,'') AS source_key,COALESCE(t.duration_ms,0) AS duration_ms
  FROM active_events e JOIN active_characters c ON c.id=e.character_id
- LEFT JOIN active_assignments ass ON ass.character_id=e.character_id
  LEFT JOIN LATERAL(SELECT tk.id,asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
- WHERE tk.event_id=e.id AND tk.revision=e.revision AND ass.character_id IS NOT NULL AND (tk.actor_id=ass.actor_id OR ass.actor_id IS NULL)
+ WHERE tk.event_id=e.id AND tk.revision=e.revision
  ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true WHERE e.scene_id=s.id
  )x),'[]'::jsonb) FROM active_scenes s WHERE s.id=$1`, scene).Scan(&raw)
 	if err != nil {

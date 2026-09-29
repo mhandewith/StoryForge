@@ -45,14 +45,15 @@ missing/deleted voices.
 
 ## Voice a completed scene
 
-Every line must have a current take from its assigned actor and a target voice.
+Every line must have a current-revision take and a target voice.
 Choose **Any actor** under **Played by** to offer a role to every linked actor.
 Each performer can record and replay their own takes. Admins can compare everyone's
 performances under **Review takes** and mark one preferred across all actors.
 Previews and ElevenLabs use that selection. The newest upload becomes preferred
 by default, including uploads after an admin selection. Assigning the role back to
-one actor restricts new recordings and selects only that actor's eligible takes;
-other recordings remain saved. Unassigned roles are not open to everyone.
+one actor restricts new recordings, but existing current-revision takes remain
+eligible for previews, conversion, preference selection, and export regardless of
+who recorded them. Unassigned roles are not open to everyone.
 New recordings automatically become preferred. Admins can listen to all takes
 under **Review takes** and mark an older take preferred; actors cannot change
 that selection manually. A subsequent new recording becomes preferred again.
@@ -76,8 +77,8 @@ or the selected line in the admin recording studio. Only that line needs a curre
 take and target voice. Each line also has a **Recorded takes** dropdown and raw
 audio player for auditioning every actor's takes. Selecting one only changes
 playback; click **Make preferred** to use it for conversion. Earlier script versions
-and takes from actors no longer assigned remain playable but cannot be preferred
-from this panel. Only admins see this cross-actor take selector.
+remain playable but cannot be preferred from this panel. Takes from actors no
+longer assigned can still be preferred. Only admins see this cross-actor take selector.
 Only the selected line needs a current
 take and target voice; the rest of the scene can be unfinished. Each action makes
 one paid conversion (or isolation), without rebuilding the full converted scene.

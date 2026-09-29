@@ -38,15 +38,16 @@ type previewLine struct {
 }
 
 // One SQL statement captures ordering, assignment and chosen takes together.
-// Only the currently assigned actor's current-revision takes are eligible.
+// Assignments control scene access, not which existing performances are selected.
+// Current-revision takes stay eligible when a role is reassigned.
 func (a *API) previewLines(ctx context.Context, scene string) ([]previewLine, error) {
 	u := identity.Current(ctx)
 	var raw []byte
 	err := a.DB.QueryRow(ctx, `SELECT COALESCE((SELECT jsonb_agg(x ORDER BY x.position,x.id) FROM (
  SELECT e.id,e.character_id AS character,e.text,e.revision,e.position,COALESCE(converted.audio_key,t.storage_key,'') AS source,COALESCE(t.duration_ms,0) AS duration_ms,converted.audio_key IS NOT NULL AS converted
- FROM active_events e JOIN active_characters c ON c.id=e.character_id LEFT JOIN active_assignments ass ON ass.character_id=e.character_id
+ FROM active_events e JOIN active_characters c ON c.id=e.character_id
  LEFT JOIN LATERAL (SELECT tk.id,asset.storage_key,asset.duration_ms FROM takes tk JOIN audio_assets asset ON asset.id=tk.asset_id
- WHERE tk.event_id=e.id AND tk.revision=e.revision AND ass.character_id IS NOT NULL AND (tk.actor_id=ass.actor_id OR ass.actor_id IS NULL)
+ WHERE tk.event_id=e.id AND tk.revision=e.revision
 	 ORDER BY tk.preferred DESC,tk.created_at DESC,tk.id DESC LIMIT 1) t ON true
  LEFT JOIN LATERAL (SELECT j.audio_key FROM voice_jobs j WHERE j.event_id=e.id AND j.take_id=t.id AND j.voice_id=c.eleven_voice_id AND j.state='complete' AND j.audio_key<>'' ORDER BY j.completed_at DESC,j.created_at DESC,j.id DESC LIMIT 1) converted ON true
  WHERE e.scene_id=s.id) x),'[]'::jsonb)
